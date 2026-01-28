@@ -224,6 +224,13 @@ export class FlowEditorComponent implements AfterViewInit {
         });
     }
 
+    clearCanvas() {
+        // Confirmação simples para evitar deletar sem querer
+        if (confirm('Tem certeza que deseja limpar todo o fluxo? Essa ação não pode ser desfeita.')) {
+            this.graph.clearCells(); // Remove todos os nós e arestas
+        }
+    }
+
     // --- MODAL QUERY BUILDER ---
     openModal(node: any) {
         this.editingNode = node;
