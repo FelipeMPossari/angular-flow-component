@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Graph, Shape, Cell } from '@antv/x6';
 
-// Interfaces definidas acima (ou importadas)
+// Interfaces
 export interface FlowTool {
     id: string;
     label: string;
@@ -17,7 +17,7 @@ export interface PropertyOption {
 }
 
 @Component({
-    selector: 'app-flow-editor', // Nome da tag para usar em outros lugares
+    selector: 'app-flow-editor',
     standalone: true,
     imports: [CommonModule, FormsModule],
     templateUrl: './flow-editor.component.html',
@@ -26,11 +26,8 @@ export interface PropertyOption {
 export class FlowEditorComponent implements AfterViewInit {
     @ViewChild('container', { static: true }) container!: ElementRef;
 
-    // --- INPUTS: O MUNDO EXTERNO ENVIA ISSO ---
-    @Input() tools: FlowTool[] = [];           // Lista de ferramentas (Slack, Sheets...)
-    @Input() properties: PropertyOption[] = []; // Lista para o IF (Status, Nome...)
-
-    // --- OUTPUTS: SE PRECISAR EXPORTAR O JSON ---
+    @Input() tools: FlowTool[] = [];
+    @Input() properties: PropertyOption[] = [];
     @Output() saveGraph = new EventEmitter<any>();
 
     private graph!: Graph;
@@ -45,7 +42,6 @@ export class FlowEditorComponent implements AfterViewInit {
     selectedOperator: string = '';
     conditionValue: any = '';
 
-    // Operadores estáticos (podem virar Input também se quiser muita flexibilidade)
     operatorsByType: any = {
         string: [{ id: 'eq', label: 'Igual a' }, { id: 'contains', label: 'Contém' }, { id: 'ne', label: 'Diferente de' }],
         number: [{ id: 'eq', label: '=' }, { id: 'gt', label: '>' }, { id: 'lt', label: '<' }, { id: 'gte', label: '>=' }],
@@ -73,47 +69,63 @@ export class FlowEditorComponent implements AfterViewInit {
                 connectionPoint: 'boundary',
                 snap: true,
 
-                // --- NOVO: REGRAS DE VALIDAÇÃO DE CONEXÃO ---
-                allowBlank: false, // Impede soltar a linha no "nada"
-                highlight: true,   // Ilumina quando a conexão é válida
+                allowBlank: false,
+                highlight: true,
 
-                validateConnection({ sourceMagnet, targetMagnet }) {
-                    // Se não houver imã (porta) de origem ou destino, não conecta
-                    if (!sourceMagnet || !targetMagnet) {
+                // --- VALIDAÇÃO DE CONEXÕES ---
+                // Agora recebemos as Views para poder checar duplicidade
+                validateConnection: ({ sourceView, targetView, sourceMagnet, targetMagnet }) => {
+                    // 1. Validação Básica: Precisa ter origem e destino
+                    if (!sourceMagnet || !targetMagnet || !sourceView || !targetView) {
                         return false;
                     }
 
-                    // Pega o nome do grupo das portas ('in', 'out', 'trueOut', 'falseOut')
-                    // O X6 adiciona automaticamente o atributo 'port-group' no HTML da porta
+                    // 2. Validação de Grupo (Entrada/Saída)
                     const sourceGroup = sourceMagnet.getAttribute('port-group');
                     const targetGroup = targetMagnet.getAttribute('port-group');
 
-                    // Regra 1: Impedir conexão se a origem for uma ENTRADA
-                    // (O fluxo deve sempre sair de um Output e chegar num Input)
-                    if (sourceGroup === 'in') {
-                        return false;
+                    // Origem deve ser SAÍDA
+                    if (sourceGroup === 'in') return false;
+
+                    // Destino deve ser ENTRADA
+                    if (targetGroup !== 'in') return false;
+
+                    // 3. Validação de Duplicidade (NOVA)
+                    // Impede criar uma aresta se ela já existe (Mesmo SourcePort -> Mesmo TargetPort)
+
+                    const sourcePortId = sourceMagnet.getAttribute('port');
+                    const targetPortId = targetMagnet.getAttribute('port');
+                    const targetNodeId = targetView.cell.id;
+
+                    // Pega todas as arestas que saem do nó de origem
+                    const outgoingEdges = this.graph.getOutgoingEdges(sourceView.cell);
+
+                    if (outgoingEdges) {
+                        // Verifica se alguma aresta já conecta na mesma porta do mesmo nó destino
+                        const isDuplicate = outgoingEdges.some(edge => {
+                            const target = edge.getTargetCell();
+                            // A aresta pode estar conectada a um ponto solto, então validamos se tem target
+                            if (target && target.id === targetNodeId) {
+                                const edgeTargetPort = edge.getTargetPortId();
+                                const edgeSourcePort = edge.getSourcePortId();
+
+                                // Se for a mesma porta de origem E a mesma porta de destino = DUPLICADA
+                                return edgeTargetPort === targetPortId && edgeSourcePort === sourcePortId;
+                            }
+                            return false;
+                        });
+
+                        if (isDuplicate) return false;
                     }
 
-                    // Regra 2: Impedir conexão se o destino for uma SAÍDA
-                    // (Não podemos ligar uma saída diretamente em outra saída)
-                    if (targetGroup !== 'in') {
-                        return false;
-                    }
-
-                    // Se passou pelas regras (Origem é Saída E Destino é Entrada), permite!
                     return true;
                 },
 
                 createEdge() {
                     return new Shape.Edge({
                         attrs: {
-                            line: {
-                                stroke: '#5F95FF',
-                                strokeWidth: 2,
-                                targetMarker: { name: 'block', width: 12, height: 8 }
-                            }
+                            line: { stroke: '#5F95FF', strokeWidth: 2, targetMarker: { name: 'block', width: 12, height: 8 } }
                         },
-                        // Adiciona zIndex para garantir que a linha fique visível
                         zIndex: 0
                     });
                 },
@@ -128,7 +140,6 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
 
-        // Clique Duplo apenas no IF
         this.graph.on('node:dblclick', ({ node }) => {
             const data = node.getData();
             if (data && data.type === 'if') {
@@ -145,100 +156,63 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('edge:mouseleave', ({ edge }) => edge.removeTools());
     }
 
-    // --- LÓGICA DE CRIAÇÃO (AGORA GENÉRICA) ---
-
-    // --- LÓGICA DE CRIAÇÃO (CORRIGIDA) ---
+    // --- LÓGICA DE CRIAÇÃO (COM TEXT WRAP) ---
     addNode(type: string, toolLabel?: string) {
         const x = 100 + Math.random() * 200;
         const y = 100 + Math.random() * 200;
 
-        // 1. Definição de Tamanho Padrão para TODOS os nós
-        // Isso garante que as portas fiquem alinhadas e as linhas retas
         const nodeWidth = 160;
         const nodeHeight = 70;
 
-        // Estilo de fonte padrão
-        const fontStyle = {
+        const labelStyle = {
             fill: '#333',
             fontSize: 14,
             fontFamily: 'Segoe UI',
             fontWeight: 600,
             textAnchor: 'middle',
             refX: 0.5,
-            refY: 0.5
+            refY: 0.5,
+            textWrap: {
+                width: nodeWidth - 20,
+                height: nodeHeight - 10,
+                ellipsis: true,
+                breakWord: false
+            }
         };
 
-        // 2. NÓ IF
         if (type === 'if') {
             this.graph.addNode({
                 x, y,
-                width: nodeWidth, height: nodeHeight, // Usa o tamanho padrão
+                width: nodeWidth, height: nodeHeight,
                 data: { type: 'if' },
-                markup: [
-                    { tagName: 'rect', selector: 'body' },
-                    { tagName: 'text', selector: 'label' }
-                ],
+                markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: {
-                    body: {
-                        fill: '#fffbe6',
-                        stroke: '#faad14',
-                        strokeWidth: 2,
-                        rx: 6, ry: 6
-                    },
-                    label: {
-                        text: 'IF',
-                        ...fontStyle
-                    }
+                    body: { fill: '#fffbe6', stroke: '#faad14', strokeWidth: 2, rx: 6, ry: 6 },
+                    label: { text: 'IF', ...labelStyle }
                 },
                 ports: {
                     groups: {
-                        in: {
-                            position: 'left',
-                            attrs: { circle: { r: 5, magnet: true, stroke: '#faad14', fill: '#fff', strokeWidth: 2 } }
-                        },
-                        trueOut: {
-                            position: 'right',
-                            label: { position: { name: 'top', args: { y: -8 } } },
-                            attrs: { circle: { r: 5, magnet: true, stroke: '#52c41a', fill: '#f6ffed', strokeWidth: 2 } }
-                        },
-                        falseOut: {
-                            position: 'bottom',
-                            label: { position: { name: 'right', args: { x: 10 } } },
-                            attrs: { circle: { r: 5, magnet: true, stroke: '#ff4d4f', fill: '#fff1f0', strokeWidth: 2 } }
-                        },
+                        in: { position: 'left', attrs: { circle: { r: 5, magnet: true, stroke: '#faad14', fill: '#fff', strokeWidth: 2 } } },
+                        trueOut: { position: 'right', label: { position: { name: 'top', args: { y: -8 } } }, attrs: { circle: { r: 5, magnet: true, stroke: '#52c41a', fill: '#f6ffed', strokeWidth: 2 } } },
+                        falseOut: { position: 'bottom', label: { position: { name: 'right', args: { x: 10 } } }, attrs: { circle: { r: 5, magnet: true, stroke: '#ff4d4f', fill: '#fff1f0', strokeWidth: 2 } } },
                     },
-                    items: [
-                        { group: 'in' },
-                        { group: 'trueOut' },
-                        { group: 'falseOut' }
-                    ],
+                    items: [{ group: 'in' }, { group: 'trueOut' }, { group: 'falseOut' }],
                 },
             });
             return;
         }
 
-        // 3. NÓS GENÉRICOS
         this.graph.addNode({
             x, y,
-            width: nodeWidth, height: nodeHeight, // Usa o MESMO tamanho padrão
+            width: nodeWidth, height: nodeHeight,
             data: { type: type },
-            markup: [
-                { tagName: 'rect', selector: 'body' },
-                { tagName: 'text', selector: 'label' }
-            ],
+            markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
             attrs: {
                 body: {
-                    fill: '#ffffff',
-                    stroke: '#ccc',
-                    strokeWidth: 2,
-                    strokeDasharray: '5,5',
-                    rx: 6, ry: 6,
-                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.05))'
+                    fill: '#ffffff', stroke: '#ccc', strokeWidth: 2, strokeDasharray: '5,5',
+                    rx: 6, ry: 6, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.05))'
                 },
-                label: {
-                    text: toolLabel || type,
-                    ...fontStyle
-                }
+                label: { text: toolLabel || type, ...labelStyle }
             },
             ports: {
                 groups: {
@@ -251,7 +225,6 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     // --- MODAL QUERY BUILDER ---
-
     openModal(node: any) {
         this.editingNode = node;
         const data = node.getData();
@@ -262,7 +235,6 @@ export class FlowEditorComponent implements AfterViewInit {
         this.conditionValue = '';
 
         if (data.conditionData) {
-            // Re-hidrata o modal com dados salvos
             this.selectedProperty = this.properties.find(p => p.id === data.conditionData.propertyId) || null;
             if (this.selectedProperty) {
                 this.updateOperators();
@@ -288,8 +260,8 @@ export class FlowEditorComponent implements AfterViewInit {
     saveCondition() {
         if (this.editingNode && this.selectedProperty && this.selectedOperator) {
             const currentData = this.editingNode.getData();
+            const opLabel = this.availableOperators.find((op: any) => op.id === this.selectedOperator)?.label;
 
-            const opLabel = this.availableOperators.find(op => op.id === this.selectedOperator)?.label;
             let displayText = `${this.selectedProperty.label}\n${opLabel}`;
             if (this.selectedProperty.type !== 'boolean') {
                 displayText += ` ${this.conditionValue}`;
@@ -314,7 +286,7 @@ export class FlowEditorComponent implements AfterViewInit {
         this.cdr.detectChanges();
     }
 
-    // --- SELEÇÃO E DELEÇÃO ---
+    // --- SELEÇÃO ---
     selectCell(cell: Cell) {
         this.resetSelection();
         this.selectedCell = cell;
