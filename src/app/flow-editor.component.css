@@ -49,40 +49,50 @@
     border: none;
     cursor: pointer;
 
-    /* TAMANHO FIXO IGUAL PARA AMBOS */
+    /* CAIXA FIXA: Garante que os botões ocupem exatamente a mesma área */
     width: 32px;
     height: 32px;
     border-radius: 4px;
+    padding: 0;
+    /* Remove qualquer padding interno */
 
-    /* Centraliza o ícone perfeitamente */
+    /* CENTRALIZAÇÃO PERFEITA */
     display: flex;
     align-items: center;
     justify-content: center;
 
-    color: #666;
+    color: #888;
+    /* Cor um pouco mais suave */
     transition: all 0.2s;
-    padding: 0;
+    line-height: 1;
+    /* Reseta altura de linha para não empurrar ícones */
 }
 
 .icon-btn:hover {
     background-color: #e6e6e6;
-    color: #000;
+    color: #333;
 }
 
 /* Ajuste específico para o botão FECHAR (X) */
 .icon-btn.close-variant {
-    font-size: 24px;
-    /* O caractere X precisa ser maior para equiparar visualmente */
-    line-height: 1;
-    padding-bottom: 2px;
-    /* Ajuste ótico vertical */
+    font-size: 26px;
+    /* O X precisa ser maior para parecer igual */
 }
 
 .icon-btn.close-variant:hover {
     background-color: #fff1f0;
-    /* Fundo vermelho claro */
     color: #ff4d4f;
-    /* X vermelho */
+}
+
+.icon-btn.maximize-variant span {
+    transform: translateY(2px);
+    display: block;
+    /* Necessário para o transform funcionar bem */
+}
+
+.icon-btn.maximize-variant {
+    font-size: 18px;
+    /* Tamanho da seta */
 }
 
 /* --- LÓGICA DO MODO MAXIMIZADO (MODAL) --- */

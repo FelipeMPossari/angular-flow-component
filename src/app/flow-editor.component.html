@@ -58,10 +58,10 @@
 
             <div class="header-actions">
 
-                <button class="icon-btn" (click)="toggleMaximize()"
+                <button class="icon-btn maximize-variant" (click)="toggleMaximize()"
                     [title]="configMaximized ? 'Restaurar' : 'Maximizar'">
-                    <span *ngIf="!configMaximized" style="font-size: 18px;">⤢</span>
-                    <span *ngIf="configMaximized" style="font-size: 18px;">⤡</span>
+                    <span *ngIf="!configMaximized">⤢</span>
+                    <span *ngIf="configMaximized">⤡</span>
                 </button>
 
                 <button class="icon-btn close-variant" (click)="closeConfig()" title="Fechar">×</button>
