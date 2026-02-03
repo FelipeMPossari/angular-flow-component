@@ -8,6 +8,93 @@
     background-color: #f8f9fa;
 }
 
+/* --- CAMPO RELATION (COMBOBOX CUSTOMIZADO) --- */
+.relation-wrapper {
+    position: relative;
+    /* Para o dropdown absoluto funcionar */
+    width: 100%;
+}
+
+.relation-input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    color: #333;
+}
+
+.relation-input:hover {
+    border-color: #1890ff;
+}
+
+/* O Dropdown Flutuante */
+.relation-dropdown {
+    position: absolute;
+    top: 100%;
+    /* Logo abaixo do input */
+    left: 0;
+    width: 100%;
+    background: #fff;
+    border: 1px solid #1890ff;
+    /* Destaque quando aberto */
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    /* Fica por cima dos campos de baixo */
+    margin-top: 2px;
+}
+
+.relation-search {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid #eee;
+    padding: 8px;
+    outline: none;
+    font-size: 13px;
+    background: #fafafa;
+}
+
+.relation-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 200px;
+    /* Altura máxima antes do scroll aparecer */
+    overflow-y: auto;
+    /* Scroll vertical */
+}
+
+.relation-list li {
+    padding: 8px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid #f9f9f9;
+}
+
+.relation-list li:hover {
+    background-color: #e6f7ff;
+    color: #1890ff;
+}
+
+.loading-item,
+.empty-item {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    cursor: default !important;
+}
+
+.loading-item:hover,
+.empty-item:hover {
+    background: none !important;
+}
+
 /* ============================================================
    CABEÇALHO E MODO MAXIMIZADO
    ============================================================ */

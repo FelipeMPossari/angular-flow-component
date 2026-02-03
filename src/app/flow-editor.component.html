@@ -128,6 +128,7 @@
 
                                     <div class="accordion-content">
                                         <div class="form-group" *ngFor="let field of section.fields">
+
                                             <label>
                                                 {{ field.label }}
                                                 <span *ngIf="field.required" style="color:red">*</span>
@@ -156,6 +157,46 @@
                                                 [(ngModel)]="dynamicValues[field.name]" rows="4"
                                                 [placeholder]="field.placeholder || ''"></textarea>
 
+                                            <div *ngIf="field.type === 'relation'" class="relation-wrapper">
+
+                                                <div class="relation-input" (click)="toggleRelation(field)">
+
+                                                    <span>
+                                                        {{ relationState[field.property]?.selectedLabel
+                                                        || dynamicValues[field.property]
+                                                        || field.placeholder
+                                                        || 'Selecione...' }}
+                                                    </span>
+                                                    <span class="arrow" style="font-size: 10px; color: #999;">▼</span>
+                                                </div>
+
+                                                <div class="relation-dropdown"
+                                                    *ngIf="relationState[field.property]?.open">
+
+                                                    <input type="text" class="relation-search" placeholder="Buscar..."
+                                                        autofocus (input)="onRelationSearch(field, $event)"
+                                                        (click)="$event.stopPropagation()">
+
+                                                    <ul class="relation-list"
+                                                        (scroll)="onRelationScroll(field, $event)">
+
+                                                        <li *ngFor="let opt of relationState[field.property]?.options"
+                                                            (click)="selectRelationItem(field, opt)">
+                                                            {{ opt.label }}
+                                                        </li>
+
+                                                        <li *ngIf="relationState[field.property]?.loading"
+                                                            class="loading-item">
+                                                            Carregando... ⏳
+                                                        </li>
+
+                                                        <li *ngIf="!relationState[field.property]?.loading && relationState[field.property]?.options?.length === 0"
+                                                            class="empty-item">
+                                                            Nenhum resultado.
+                                                        </li>
+                                                    </ul>
+                                                </div>
+                                            </div>
                                             <select *ngIf="field.type === 'select'"
                                                 [(ngModel)]="dynamicValues[field.name]">
                                                 <option [ngValue]="undefined" disabled>Selecione...</option>

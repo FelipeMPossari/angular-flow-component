@@ -72,6 +72,7 @@ export class FlowEditorComponent implements AfterViewInit {
     private graph!: Graph;
     public uiConfigSections: any[] = [];
     public configMaximized: boolean = false;
+    public relationState: any = {};
 
     selectedCell: Cell | null = null;
     // Controle de Visibilidade das Sidebars
@@ -106,6 +107,91 @@ export class FlowEditorComponent implements AfterViewInit {
 
     toggleActions() {
         this.showActions = !this.showActions;
+    }
+
+    loadRelationData(field: any, isScroll = false) {
+        if (!this.control || !this.control.searchRelation) {
+            console.warn("⚠️ Função searchRelation não definida na Ponte!");
+            return;
+        }
+
+        const key = field.property; // MUDANÇA: Chave é 'property'
+        const state = this.relationState[key];
+
+        if (state.loading) return;
+        if (isScroll && !state.hasMore) return;
+
+        state.loading = true;
+
+        // MUDANÇA: Passamos 'field.class' em vez de 'field.resource'
+        this.control.searchRelation(field.class, state.search, state.page)
+            .then((response: any) => {
+
+                if (state.page === 1) {
+                    state.options = response.items;
+                } else {
+                    state.options = [...state.options, ...response.items];
+                }
+
+                state.hasMore = response.hasMore;
+                state.page++;
+                state.loading = false;
+            })
+            .catch((err: any) => {
+                console.error("Erro ao buscar relation", err);
+                state.loading = false;
+            });
+    }
+
+    onRelationSearch(field: any, event: any) {
+        const term = event.target.value;
+        const key = field.property; // MUDANÇA: Chave é 'property'
+        const state = this.relationState[key];
+
+        state.search = term;
+        state.page = 1;
+        state.hasMore = true;
+
+        if (state.timeout) clearTimeout(state.timeout);
+        state.timeout = setTimeout(() => {
+            this.loadRelationData(field);
+        }, 500);
+    }
+
+    onRelationScroll(field: any, event: any) {
+        const element = event.target;
+        if (element.scrollHeight - element.scrollTop <= element.clientHeight + 20) {
+            this.loadRelationData(field, true);
+        }
+    }
+
+    selectRelationItem(field: any, item: any) {
+        const key = field.property; // MUDANÇA: Chave é 'property'
+
+        // MUDANÇA: Salvamos no modelo usando o nome da propriedade
+        this.dynamicValues[key] = item.id;
+
+        this.relationState[key].selectedLabel = item.label;
+        this.relationState[key].open = false;
+    }
+
+    toggleRelation(field: any) {
+        // MUDANÇA: Usamos 'field.property' como chave única do estado
+        const key = field.property;
+
+        if (!this.relationState[key]) {
+            this.relationState[key] = {
+                options: [],
+                page: 1,
+                loading: false,
+                open: false,
+                search: '',
+                hasMore: true
+            };
+            this.loadRelationData(field);
+        }
+
+        this.relationState[key].open = !this.relationState[key].open;
     }
 
     public toggleMaximize() {
