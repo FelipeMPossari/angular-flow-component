@@ -111,25 +111,31 @@ export class FlowEditorComponent implements AfterViewInit {
 
     loadRelationData(field: any, isScroll = false) {
         if (!this.control || !this.control.searchRelation) {
-            console.warn("⚠️ Função searchRelation não definida na Ponte!");
+            console.warn("⚠️ Função searchRelation não definida na Ponte (flowAPI)!");
             return;
         }
 
-        const key = field.property; // MUDANÇA: Chave é 'property'
+        const key = field.property;
         const state = this.relationState[key];
 
+        // 2. Proteção contra chamadas duplicadas ou desnecessárias
         if (state.loading) return;
         if (isScroll && !state.hasMore) return;
 
         state.loading = true;
 
-        // MUDANÇA: Passamos 'field.class' em vez de 'field.resource'
-        this.control.searchRelation(field.class, state.search, state.page)
+        // 3. Captura os filtros extras definidos no JSON (ex: { status: 'ativo' })
+        const filtrosExtras = field.filter || {};
+
+        // 4. Chamada à Ponte com os 4 parâmetros: Classe, Busca, Página e Filtros
+        this.control.searchRelation(field.class, state.search, state.page, filtrosExtras)
             .then((response: any) => {
 
                 if (state.page === 1) {
+                    // Primeira página: substitui a lista
                     state.options = response.items;
                 } else {
+                    // Scroll infinito: concatena na lista existente
                     state.options = [...state.options, ...response.items];
                 }
 
@@ -138,7 +144,7 @@ export class FlowEditorComponent implements AfterViewInit {
                 state.loading = false;
             })
             .catch((err: any) => {
-                console.error("Erro ao buscar relation", err);
+                console.error("Erro ao buscar relation na ponte:", err);
                 state.loading = false;
             });
     }
