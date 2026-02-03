@@ -8,6 +8,117 @@
     background-color: #f8f9fa;
 }
 
+/* ============================================================
+   CABEÇALHO E MODO MAXIMIZADO
+   ============================================================ */
+
+/* --- CONFIGURAÇÃO DO CABEÇALHO --- */
+.config-header {
+    display: flex;
+    justify-content: space-between;
+    /* Título na esquerda, botões na direita */
+    align-items: center;
+    padding: 15px 20px;
+    border-bottom: 1px solid #eee;
+    background-color: #fafafa;
+
+    /* Garante que o cabeçalho fique fixo no topo se o conteúdo rolar */
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.config-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+/* Container que agrupa os botões na direita */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Espaço entre os botões */
+}
+
+/* --- BOTÕES PADRONIZADOS (Maximizar e Fechar) --- */
+.icon-btn {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+
+    /* TAMANHO FIXO IGUAL PARA AMBOS */
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+
+    /* Centraliza o ícone perfeitamente */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    color: #666;
+    transition: all 0.2s;
+    padding: 0;
+}
+
+.icon-btn:hover {
+    background-color: #e6e6e6;
+    color: #000;
+}
+
+/* Ajuste específico para o botão FECHAR (X) */
+.icon-btn.close-variant {
+    font-size: 24px;
+    /* O caractere X precisa ser maior para equiparar visualmente */
+    line-height: 1;
+    padding-bottom: 2px;
+    /* Ajuste ótico vertical */
+}
+
+.icon-btn.close-variant:hover {
+    background-color: #fff1f0;
+    /* Fundo vermelho claro */
+    color: #ff4d4f;
+    /* X vermelho */
+}
+
+/* --- LÓGICA DO MODO MAXIMIZADO (MODAL) --- */
+
+/* Quando a classe .maximized é adicionada, a sidebar vira uma modal no centro */
+.config-sidebar.maximized {
+    width: 900px;
+    /* Largura expandida */
+    max-width: 95vw;
+    /* Respeita telas menores */
+    height: 85vh;
+    /* Altura fixa */
+
+    /* Centralização Absoluta na tela */
+    top: 50%;
+    right: auto;
+    left: 50%;
+    transform: translate(-50%, -50%) !important;
+    /* !important vence o slide da sidebar */
+
+    /* Visual de Modal */
+    border-radius: 8px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+}
+
+/* Garante a transição suave entre os estados */
+.config-sidebar {
+    transition:
+        transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+        width 0.3s ease,
+        height 0.3s ease,
+        border-radius 0.3s ease,
+        top 0.3s ease,
+        left 0.3s ease;
+}
+
 /* --- ESTILO MINIMALISTA DO ACCORDION --- */
 
 /* O container da seção (removemos bordas e fundos) */

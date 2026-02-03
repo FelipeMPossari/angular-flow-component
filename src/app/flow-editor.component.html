@@ -51,11 +51,21 @@
 
     <div class="config-overlay" [class.active]="showConfig" (click)="closeConfig()"></div>
 
-    <div class="config-sidebar" [class.active]="showConfig">
+    <div class="config-sidebar" [class.active]="showConfig" [class.maximized]="configMaximized">
 
         <div class="config-header">
             <h3>Configuração</h3>
-            <button class="close-btn" (click)="closeConfig()">×</button>
+
+            <div class="header-actions">
+
+                <button class="icon-btn" (click)="toggleMaximize()"
+                    [title]="configMaximized ? 'Restaurar' : 'Maximizar'">
+                    <span *ngIf="!configMaximized" style="font-size: 18px;">⤢</span>
+                    <span *ngIf="configMaximized" style="font-size: 18px;">⤡</span>
+                </button>
+
+                <button class="icon-btn close-variant" (click)="closeConfig()" title="Fechar">×</button>
+            </div>
         </div>
 
         <div class="config-body">

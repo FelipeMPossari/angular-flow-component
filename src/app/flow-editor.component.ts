@@ -71,8 +71,9 @@ export class FlowEditorComponent implements AfterViewInit {
 
     private graph!: Graph;
     public uiConfigSections: any[] = [];
-    selectedCell: Cell | null = null;
+    public configMaximized: boolean = false;
 
+    selectedCell: Cell | null = null;
     // Controle de Visibilidade das Sidebars
     showActions = true;  // Sidebar Esquerda (Ferramentas)
     showConfig = false; // Sidebar Direita (Configuração)
@@ -105,6 +106,10 @@ export class FlowEditorComponent implements AfterViewInit {
 
     toggleActions() {
         this.showActions = !this.showActions;
+    }
+
+    public toggleMaximize() {
+        this.configMaximized = !this.configMaximized;
     }
 
     private prepareFormSections(schema: any) {
@@ -484,9 +489,20 @@ export class FlowEditorComponent implements AfterViewInit {
         this.closeConfig();
     }
 
-    closeConfig() {
+    public closeConfig() {
+        // 1. Inicia a animação de fechar (slide out)
         this.showConfig = false;
+
+        // 2. Limpa a variável do nó que estava sendo editado
         this.editingNode = null;
+
+        // 3. Aguarda a animação terminar (300ms) para resetar o tamanho
+        // Isso evita que a janela "encolha" visualmente antes de sumir
+        setTimeout(() => {
+            this.configMaximized = false;
+        }, 300);
+
+        // 4. Força a detecção de mudanças do Angular
         this.cdr.detectChanges();
     }
 
