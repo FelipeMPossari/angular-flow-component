@@ -1,4 +1,7 @@
-import { Component, AfterViewInit, ViewChild, ElementRef, HostListener, NgZone, ChangeDetectorRef, Input, Output, EventEmitter } from '@angular/core';
+import {
+    Component, AfterViewInit, ViewChild, ElementRef,
+    HostListener, NgZone, ChangeDetectorRef, Input, Output, EventEmitter, SimpleChanges
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Graph, Shape, Cell } from '@antv/x6';
@@ -19,12 +22,12 @@ export interface PropertyOption {
 
 // Interfaces para o Formulário Dinâmico
 export interface ToolField {
-    name: string;        // Chave do JSON (ex: 'channel_id')
-    label: string;       // Texto visível
+    name: string;
+    label: string;
     type: 'text' | 'number' | 'select' | 'boolean' | 'textarea' | 'date';
     placeholder?: string;
     required?: boolean;
-    options?: { label: string; value: any }[]; // Apenas para select
+    options?: { label: string; value: any }[];
 }
 
 export interface ToolSchema {
@@ -61,11 +64,13 @@ export class FlowEditorComponent implements AfterViewInit {
     @Input() tools: FlowTool[] = [];
     @Input() properties: PropertyOption[] = [];
     @Input() schemas: ToolSchema[] = []; // Schemas dos formulários dinâmicos
+    @Input() control: any;
 
     // --- OUTPUT (Para o Pai) ---
     @Output() saveGraph = new EventEmitter<WorkflowDefinition>();
 
     private graph!: Graph;
+    public uiConfigSections: any[] = [];
     selectedCell: Cell | null = null;
 
     // Controle de Visibilidade das Sidebars
@@ -100,6 +105,29 @@ export class FlowEditorComponent implements AfterViewInit {
 
     toggleActions() {
         this.showActions = !this.showActions;
+    }
+
+    private prepareFormSections(schema: any) {
+        this.uiConfigSections = []; // Limpa anterior
+
+        if (!schema) return;
+
+        // CENÁRIO A: O JSON já tem seções (Formato Novo)
+        // Esperamos algo como: { type: 'email', sections: [ { title: 'Geral', fields: [] } ] }
+        if (schema.sections && Array.isArray(schema.sections)) {
+            this.uiConfigSections = schema.sections;
+        }
+        // CENÁRIO B: O JSON é antigo (só tem 'fields')
+        // A gente cria uma seção "Geral" falsa para não quebrar o layout
+        else if (schema.fields && Array.isArray(schema.fields)) {
+            this.uiConfigSections = [
+                {
+                    title: 'Configurações Gerais',
+                    fields: schema.fields,
+                    expanded: true // Para vir aberto por padrão
+                }
+            ];
+        }
     }
 
     private initGraph() {
@@ -161,6 +189,81 @@ export class FlowEditorComponent implements AfterViewInit {
         this.registerEvents();
     }
 
+    public getExportData() {
+        // 1. Pega o JSON Completo (Visual + Dados)
+        // Esse serve para você salvar no banco e conseguir reabrir o fluxograma identico depois
+        const fullGraph = this.graph.toJSON();
+
+        // 2. Pega o JSON de Lógica (Limpo)
+        // Esse serve para o seu backend processar o fluxo (C#, Node, etc)
+        const logicData = {
+            nodes: fullGraph.cells
+                .filter((cell: any) => cell.shape !== 'edge') // Pega só os nós
+                .map((node: any) => ({
+                    id: node.id,
+                    type: node.data?.type,    // Ex: 'action', 'if', 'start'
+                    label: node.data?.label,  // O nome visual
+                    config: node.data         // Os valores preenchidos (formulários)
+                })),
+            edges: fullGraph.cells
+                .filter((cell: any) => cell.shape === 'edge') // Pega só as linhas
+                .map((edge: any) => ({
+                    source: edge.source.cell, // ID do nó de origem
+                    target: edge.target.cell, // ID do nó de destino
+                    sourcePort: edge.source.port, // Qual bolinha saiu (útil para IFs)
+                }))
+        };
+
+        const result = {
+            logic: logicData,
+            graph: fullGraph
+        };
+
+        console.log('📦 Dados Gerados:', result);
+        return result;
+    }
+
+    /**
+   * Recebe o JSON completo (formato X6/Graph) e desenha na tela.
+   * @param data Pode ser um Objeto JSON ou uma String JSON.
+   */
+    public importData(data: any) {
+        console.log("📥 Recebendo dados para importação...", data);
+
+        try {
+            // 1. Garante que é um objeto (se vier string do banco, converte)
+            const graphData = typeof data === 'string' ? JSON.parse(data) : data;
+
+            // 2. Verifica se o JSON é válido para o X6
+            // (Geralmente o JSON salvo tem a propriedade 'cells')
+            if (!graphData || (!graphData.cells && !Array.isArray(graphData))) {
+                console.warn("⚠️ O JSON fornecido não parece ser um gráfico válido do X6.");
+                return false;
+            }
+
+            // 3. Carrega no Gráfico (O X6 faz a mágica)
+            this.graph.fromJSON(graphData);
+
+            // 4. Centraliza o conteúdo para ficar bonito
+            this.graph.zoomToFit({ padding: 20, maxScale: 1 });
+
+            console.log("✅ Importação concluída com sucesso!");
+            return true;
+
+        } catch (error) {
+            console.error("❌ Erro ao importar dados:", error);
+            return false;
+        }
+    }
+
+    ngOnChanges(changes: SimpleChanges): void {
+        if (changes['control'] && this.control) {
+            this.control.getExportData = this.getExportData.bind(this);
+            this.control.importData = this.importData.bind(this);
+            this.control.clearCanvas = this.clearCanvas.bind(this);
+        }
+    }
+
     private registerEvents() {
         this.graph.on('node:click', ({ node }) => this.ngZone.run(() => this.selectCell(node)));
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
@@ -182,29 +285,28 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     // --- CRIAÇÃO DE NÓS ---
-    addNode(type: string, toolLabel?: string) {
-        const x = 100 + Math.random() * 200;
-        const y = 100 + Math.random() * 200;
+    addNode(type: string, toolLabel?: string, position?: { x: number, y: number }) {
+
+        // Se passou posição (drop), usa ela. Se não (clique), gera aleatório.
+        const x = position ? position.x : 100 + Math.random() * 200;
+        const y = position ? position.y : 100 + Math.random() * 200;
 
         const nodeWidth = 160;
         const nodeHeight = 70;
 
-        // Estilo com TextWrap (Reticências)
+        // Centraliza o nó no mouse quando soltar (opcional, ajusta o pivô para o centro)
+        const finalX = position ? x - (nodeWidth / 2) : x;
+        const finalY = position ? y - (nodeHeight / 2) : y;
+
         const labelStyle = {
             fill: '#333', fontSize: 14, fontFamily: 'Segoe UI', fontWeight: 600,
             textAnchor: 'middle', refX: 0.5, refY: 0.5,
-            textWrap: {
-                width: nodeWidth - 20,
-                height: nodeHeight - 10,
-                ellipsis: true,
-                breakWord: false
-            }
+            textWrap: { width: nodeWidth - 20, height: nodeHeight - 10, ellipsis: true, breakWord: false }
         };
 
-        // 1. NÓ IF
         if (type === 'if') {
             this.graph.addNode({
-                x, y, width: nodeWidth, height: nodeHeight,
+                x: finalX, y: finalY, width: nodeWidth, height: nodeHeight, // Usa finalX/Y
                 data: { type: 'if' },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: {
@@ -217,17 +319,15 @@ export class FlowEditorComponent implements AfterViewInit {
                         trueOut: { position: 'right', attrs: { circle: { r: 5, magnet: true, stroke: '#52c41a', fill: '#f6ffed', strokeWidth: 2 } } },
                         falseOut: { position: 'bottom', attrs: { circle: { r: 5, magnet: true, stroke: '#ff4d4f', fill: '#fff1f0', strokeWidth: 2 } } },
                     },
-                    // IMPORTANTE: IDs definidos para exportação funcionar
                     items: [{ group: 'in', id: 'in' }, { group: 'trueOut', id: 'trueOut' }, { group: 'falseOut', id: 'falseOut' }],
                 },
             });
             return;
         }
 
-        // 2. NÓS GENÉRICOS
         this.graph.addNode({
-            x, y, width: nodeWidth, height: nodeHeight,
-            data: { type: type, label: toolLabel || type }, // Salva o label original nos dados
+            x: finalX, y: finalY, width: nodeWidth, height: nodeHeight, // Usa finalX/Y
+            data: { type: type, label: toolLabel || type },
             markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
             attrs: {
                 body: {
@@ -241,10 +341,50 @@ export class FlowEditorComponent implements AfterViewInit {
                     in: { position: 'left', attrs: { circle: { r: 5, magnet: true, stroke: '#5F95FF', fill: '#fff', strokeWidth: 2 } } },
                     out: { position: 'right', attrs: { circle: { r: 5, magnet: true, stroke: '#5F95FF', fill: '#fff', strokeWidth: 2 } } },
                 },
-                // IMPORTANTE: IDs definidos
                 items: [{ group: 'in', id: 'in' }, { group: 'out', id: 'out' }],
             },
         });
+    }
+
+    // --- 2. NOVOS MÉTODOS PARA DRAG AND DROP ---
+
+    onDragStart(event: DragEvent, type: string, label: string = '') {
+        if (event.dataTransfer) {
+            // Guarda os dados do botão que está sendo arrastado
+            event.dataTransfer.setData('application/json', JSON.stringify({ type, label }));
+            event.dataTransfer.effectAllowed = 'copy';
+
+            // Opcional: Define uma imagem "fantasma" personalizada se quiser
+            // event.dataTransfer.setDragImage(imgElement, 0, 0);
+        }
+    }
+
+    onDragOver(event: DragEvent) {
+        // É OBRIGATÓRIO prevenir o default para permitir o Drop
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'copy';
+        }
+    }
+
+    onDrop(event: DragEvent) {
+        event.preventDefault();
+        if (!event.dataTransfer) return;
+
+        const dataString = event.dataTransfer.getData('application/json');
+        if (!dataString) return;
+
+        try {
+            const { type, label } = JSON.parse(dataString);
+
+            // A MÁGICA: Converte coordenadas da tela (px) para coordenadas do grafo (X6)
+            // Isso considera zoom, pan e scroll
+            const { x, y } = this.graph.clientToLocal(event.clientX, event.clientY);
+
+            this.addNode(type, label, { x, y });
+        } catch (e) {
+            console.error('Erro ao processar drop', e);
+        }
     }
 
     // --- LÓGICA DO MENU LATERAL DE CONFIGURAÇÃO ---
@@ -284,7 +424,7 @@ export class FlowEditorComponent implements AfterViewInit {
 
             if (schema) {
                 this.currentSchema = schema;
-                // Carrega valores salvos ou inicia vazio
+                this.prepareFormSections(schema);
                 this.dynamicValues = { ...(data.config || {}) };
             }
         }

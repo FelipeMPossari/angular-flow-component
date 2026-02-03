@@ -3,71 +3,59 @@ import { FlowEditorComponent, FlowTool, PropertyOption, ToolSchema } from './flo
 
 @Component({
     selector: 'app-root',
-    standalone: true,
+    standalone: true, // Se seu projeto for full standalone
+    // Se não for standalone, remova essa linha e o imports abaixo, e deixe o AppModule gerenciar
     imports: [FlowEditorComponent],
     template: `
     <app-flow-editor 
-      [tools]="myTools" 
-      [properties]="myIfProperties"
-      [schemas]="myToolSchemas" 
-      (saveGraph)="handleSave($event)">
+      [tools]="mockTools" 
+      [properties]="mockProperties"
+      [schemas]="mockSchemas" 
+      (saveGraph)="onSave($event)">
     </app-flow-editor>
-  `
+  `,
+    styles: []
 })
 export class AppComponent {
 
-    // 1. Ferramentas (Barra Lateral)
-    myTools: FlowTool[] = [
+    // 1. Ferramentas de Teste
+    mockTools: FlowTool[] = [
         { id: 'slack', label: 'Slack', icon: '💬' },
-        { id: 'email', label: 'Send Email', icon: '📧' },
+        { id: 'email', label: 'E-mail', icon: '📧' },
         { id: 'api', label: 'HTTP Request', icon: '🌐' }
     ];
 
-    // 2. Propriedades (Para o IF)
-    myIfProperties: PropertyOption[] = [
-        { id: 'score', label: 'Pontuação', type: 'number' }
+    // 2. Propriedades pro IF
+    mockProperties: PropertyOption[] = [
+        { id: 'valor_total', label: 'Valor do Pedido', type: 'number' },
+        { id: 'vip', label: 'Cliente VIP?', type: 'boolean' },
+        { id: 'cidade', label: 'Cidade', type: 'string' }
     ];
 
-    // 3. ESQUEMAS DINÂMICOS (O Segredo!)
-    // Aqui você define quais campos aparecem para cada ferramenta
-    myToolSchemas: ToolSchema[] = [
+    // 3. SCHEMAS (O Teste de Fogo do Menu Lateral)
+    mockSchemas: ToolSchema[] = [
         {
             type: 'slack',
             fields: [
-                { name: 'channel', label: 'Canal de Envio', type: 'text', placeholder: '#geral', required: true },
-                { name: 'message', label: 'Mensagem', type: 'textarea', placeholder: 'Digite sua mensagem...' },
-                { name: 'is_bot', label: 'Enviar como Bot?', type: 'boolean' }
+                { name: 'channel', label: 'Canal (#)', type: 'text', placeholder: '#geral', required: true },
+                { name: 'msg', label: 'Mensagem', type: 'textarea' }
             ]
         },
         {
             type: 'email',
             fields: [
-                { name: 'to', label: 'Destinatário', type: 'text', placeholder: 'cliente@email.com' },
-                { name: 'subject', label: 'Assunto', type: 'text', required: true },
-                { name: 'body', label: 'Corpo do Email', type: 'textarea' },
+                { name: 'destinatario', label: 'Para:', type: 'text' },
+                { name: 'assunto', label: 'Assunto', type: 'text' },
                 {
-                    name: 'priority', label: 'Prioridade', type: 'select',
-                    options: [
-                        { label: 'Baixa', value: 'low' },
-                        { label: 'Alta', value: 'high' }
-                    ]
+                    name: 'prioridade', label: 'Prioridade', type: 'select',
+                    options: [{ label: 'Alta', value: 1 }, { label: 'Baixa', value: 0 }]
                 }
-            ]
-        },
-        {
-            type: 'api',
-            fields: [
-                { name: 'url', label: 'URL da API', type: 'text', placeholder: 'https://api.exemplo.com' },
-                {
-                    name: 'method', label: 'Método HTTP', type: 'select',
-                    options: [{ label: 'GET', value: 'GET' }, { label: 'POST', value: 'POST' }]
-                },
-                { name: 'headers', label: 'Headers (JSON)', type: 'textarea' }
             ]
         }
     ];
 
-    handleSave(json: any) {
-        console.log('JSON Final:', json);
+    onSave(json: any) {
+        console.log('📦 JSON PRONTO PARA O BACKEND:', json);
+        alert('JSON gerado! Olhe o console (F12).');
     }
 }

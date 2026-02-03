@@ -1,11 +1,83 @@
 /* --- LAYOUT PRINCIPAL --- */
 .app-container {
     display: flex;
-    width: 100vw;
-    height: 100vh;
+    width: 100%;
+    height: 100%;
     font-family: 'Segoe UI', sans-serif;
     overflow: hidden;
-    /* Impede rolagem na página inteira */
+    background-color: #f8f9fa;
+}
+
+/* --- ESTILO MINIMALISTA DO ACCORDION --- */
+
+/* O container da seção (removemos bordas e fundos) */
+.accordion-section {
+    /* Removemos border, border-radius e background */
+    margin-bottom: 20px;
+    /* Espaço entre um grupo e outro */
+}
+
+/* O Cabeçalho clicável (<summary>) */
+.accordion-header {
+    /* Removemos background e padding lateral */
+    padding: 10px 0;
+    font-weight: 700;
+    /* Mais destaque para parecer um título */
+    color: #333;
+    /* Cor mais escura */
+    font-size: 14px;
+    cursor: pointer;
+
+    /* Mantém a estrutura flex para alinhar a seta */
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: color 0.2s;
+}
+
+/* Efeito hover suave apenas no texto */
+.accordion-header:hover {
+    color: #000;
+    /* Removemos o background hover */
+}
+
+/* Remove a seta padrão nativa do navegador */
+.accordion-header::-webkit-details-marker {
+    display: none;
+}
+
+/* Animação da setinha (mantivemos igual) */
+details[open] .accordion-header .icon {
+    transform: rotate(180deg);
+}
+
+.icon {
+    font-size: 12px;
+    color: #999;
+    /* Seta cinza discreta */
+    transition: transform 0.3s ease;
+}
+
+/* Conteúdo interno */
+.accordion-content {
+    /* Removemos padding lateral, border-top e background */
+    padding: 10px 0;
+    /* Adiciona um pequeno recuo para indicar hierarquia (opcional) */
+    padding-left: 10px;
+}
+
+:host {
+    display: block;
+    /* Web Components nascem 'inline', precisamos mudar para bloco */
+    width: 100%;
+    /* Ocupa 100% da div PAI do legado */
+    height: 100%;
+    /* Ocupa 100% da altura do PAI */
+    position: relative;
+    /* Garante que posicionamentos absolutos fiquem aqui dentro */
+    overflow: hidden;
+    /* Evita que nada vaze para fora da borda arredondada/container */
 }
 
 /* --- SIDEBAR ESQUERDA (FERRAMENTAS) --- */

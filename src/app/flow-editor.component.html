@@ -3,14 +3,15 @@
     <div class="sidebar">
 
         <div class="section-header" (click)="toggleActions()">
-            <h3>Ferramentas</h3>
+            <h3>Ações</h3>
             <button class="toggle-btn">
                 {{ showActions ? '▼' : '▶' }}
             </button>
         </div>
 
         <div class="actions-container" *ngIf="showActions">
-            <button *ngFor="let tool of tools" (click)="addNode(tool.id, tool.label)">
+            <button *ngFor="let tool of tools" (click)="addNode(tool.id, tool.label)" draggable="true"
+                (dragstart)="onDragStart($event, tool.id, tool.label)" style="cursor: grab;">
                 <span *ngIf="tool.icon" style="margin-right: 5px;">{{ tool.icon }}</span>
                 {{ tool.label }}
             </button>
@@ -18,44 +19,35 @@
 
         <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
 
-        <h4 style="margin: 5px 0; color: #666; font-size: 12px; text-transform: uppercase;">Lógica</h4>
-        <button (click)="addNode('if')" style="border-left: 4px solid #faad14; background: #fffbe6;">
-            🔀 IF Condition
+        <h3 style="margin: 5px 0;; font-size: 12px; text-transform: uppercase;">Lógica</h3>
+
+        <button (click)="addNode('if')" draggable="true" (dragstart)="onDragStart($event, 'if', 'IF')"
+            style="border-left: 4px solid #faad14; background: #fffbe6; cursor: grab;">
+            🔀 Condição (IF)
         </button>
 
         <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
 
-        <h4 style="margin: 5px 0; color: #666; font-size: 12px; text-transform: uppercase;">Projeto</h4>
-
-        <button (click)="saveProjectFile()" style="border-color: #1890ff; color: #1890ff; background: #e6f7ff;">
-            📥 Baixar Projeto
-        </button>
-
         <button (click)="triggerFileInput()"
             style="margin-top: 5px; border-color: #1890ff; color: #1890ff; background: #e6f7ff;">
-            📂 Abrir Projeto
+            📂 Importar Fluxo
         </button>
 
         <input type="file" id="fileInput" style="display: none;" accept=".json" (change)="onFileSelected($event)">
 
-        <div style="height: 10px;"></div>
-
-        <button (click)="exportGraph()" style="border-color: #52c41a; color: #52c41a; background: #f6ffed;">
-            🚀 Exportar API
-        </button>
-
         <button (click)="clearCanvas()" style="margin-top: 5px; border-color: #ff4d4f; color: #ff4d4f;">
-            🗑️ Limpar Tela
+            🗑️ Limpar Fluxo
         </button>
 
         <div class="instruction">
             <small>🖱️ Arrastar e Conectar</small><br>
             <small>🗑️ Delete para apagar</small><br>
-            <small>✏️ Clique Duplo p/ Editar</small>
+            <small>✏️ Clique Duplo para Editar</small>
         </div>
     </div>
 
-    <div #container class="graph-container"></div>
+    <div #container class="graph-container" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+    </div>
 
     <div class="config-overlay" [class.active]="showConfig" (click)="closeConfig()"></div>
 
@@ -67,7 +59,6 @@
         </div>
 
         <div class="config-body">
-
             <ng-container [ngSwitch]="editingNode?.getData()?.type">
 
                 <div *ngSwitchCase="'if'">
@@ -109,67 +100,84 @@
 
                     <div class="form-group">
                         <label>Nome do Passo (Visual):</label>
-                        <input type="text" [(ngModel)]="editingNodeLabel" placeholder="Ex: Enviar Email de Boas Vindas">
-                        <small style="color:#999; font-size:11px;">Nome que aparece no desenho.</small>
+                        <input type="text" [(ngModel)]="editingNodeLabel" placeholder="Ex: Enviar Email">
                     </div>
 
-                    <hr style="border:0; border-top:1px dashed #eee; margin:15px 0;">
-
                     <div *ngIf="currentSchema; else noSchemaTpl">
+                        <hr style="border:0; border-top:1px dashed #eee; margin:15px 0;">
 
-                        <div class="form-group" *ngFor="let field of currentSchema.fields">
-                            <label>
-                                {{ field.label }}
-                                <span *ngIf="field.required" style="color:red">*</span>
-                            </label>
+                        <div *ngIf="uiConfigSections.length > 0; else noSchemaTpl">
 
-                            <input *ngIf="field.type === 'text'" type="text" [(ngModel)]="dynamicValues[field.name]"
-                                [placeholder]="field.placeholder || ''">
+                            <div *ngFor="let section of uiConfigSections; let i = index" class="accordion-section">
 
-                            <input *ngIf="field.type === 'number'" type="number" [(ngModel)]="dynamicValues[field.name]"
-                                [placeholder]="field.placeholder || ''">
+                                <details [open]="i === 0 || section.expanded">
+                                    <summary class="accordion-header">
+                                        {{ section.title }}
+                                        <span class="icon">▼</span>
+                                    </summary>
 
-                            <input *ngIf="field.type === 'date'" type="date" [(ngModel)]="dynamicValues[field.name]">
+                                    <div class="accordion-content">
+                                        <div class="form-group" *ngFor="let field of section.fields">
+                                            <label>
+                                                {{ field.label }}
+                                                <span *ngIf="field.required" style="color:red">*</span>
+                                            </label>
 
-                            <div *ngIf="field.type === 'boolean'" style="display:flex; align-items:center; gap:10px;">
-                                <input type="checkbox" [(ngModel)]="dynamicValues[field.name]"
-                                    style="width:auto; margin:0;">
-                                <span style="color:#666; font-size:13px;">{{ field.placeholder || 'Ativar?' }}</span>
+                                            <input *ngIf="field.type === 'text'" type="text"
+                                                [(ngModel)]="dynamicValues[field.name]"
+                                                [placeholder]="field.placeholder || ''">
+
+                                            <input *ngIf="field.type === 'number'" type="number"
+                                                [(ngModel)]="dynamicValues[field.name]"
+                                                [placeholder]="field.placeholder || ''">
+
+                                            <input *ngIf="field.type === 'date'" type="date"
+                                                [(ngModel)]="dynamicValues[field.name]">
+
+                                            <div *ngIf="field.type === 'boolean'"
+                                                style="display:flex; align-items:center; gap:10px;">
+                                                <input type="checkbox" [(ngModel)]="dynamicValues[field.name]"
+                                                    style="width:auto; margin:0;">
+                                                <span style="color:#666; font-size:13px;">{{ field.placeholder ||
+                                                    'Ativar?' }}</span>
+                                            </div>
+
+                                            <textarea *ngIf="field.type === 'textarea'"
+                                                [(ngModel)]="dynamicValues[field.name]" rows="4"
+                                                [placeholder]="field.placeholder || ''"></textarea>
+
+                                            <select *ngIf="field.type === 'select'"
+                                                [(ngModel)]="dynamicValues[field.name]">
+                                                <option [ngValue]="undefined" disabled>Selecione...</option>
+                                                <option *ngFor="let opt of field.options" [ngValue]="opt.value">{{
+                                                    opt.label }}</option>
+                                            </select>
+
+                                        </div>
+                                    </div>
+                                </details>
                             </div>
 
-                            <textarea *ngIf="field.type === 'textarea'" [(ngModel)]="dynamicValues[field.name]" rows="4"
-                                [placeholder]="field.placeholder || ''"
-                                style="width:100%; border:1px solid #ddd; border-radius:6px; padding:10px; font-family:inherit; box-sizing: border-box;">
-              </textarea>
-
-                            <select *ngIf="field.type === 'select'" [(ngModel)]="dynamicValues[field.name]">
-                                <option [ngValue]="undefined" disabled>Selecione...</option>
-                                <option *ngFor="let opt of field.options" [ngValue]="opt.value">
-                                    {{ opt.label }}
-                                </option>
-                            </select>
-
                         </div>
+
+                        <ng-template #noSchemaTpl>
+                        </ng-template>
                     </div>
 
                     <ng-template #noSchemaTpl>
                         <div
                             style="background:#f9f9f9; padding:15px; border-radius:6px; color:#999; text-align:center; font-style:italic;">
-                            Nenhuma configuração extra necessária.
+                            Nenhuma configuração extra.
                         </div>
                     </ng-template>
-
                 </div>
 
             </ng-container>
-
         </div>
 
         <div class="config-footer">
             <button class="cancel-btn" (click)="closeConfig()">Cancelar</button>
             <button class="save-btn" (click)="saveConfiguration()">Salvar Alterações</button>
         </div>
-
     </div>
-
 </div>
