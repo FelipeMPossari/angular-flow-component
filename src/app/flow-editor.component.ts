@@ -204,6 +204,63 @@ export class FlowEditorComponent implements AfterViewInit {
         this.configMaximized = !this.configMaximized;
     }
 
+    /**
+ * Varre os campos configurados. Se achar um 'relation' com ID salvo,
+ * chama a ponte para descobrir o nome (Label) desse ID.
+ */
+    private loadSavedLabels() {
+        if (!this.dynamicValues || !this.uiConfigSections) return;
+
+        // Varre todas as seções e campos
+        this.uiConfigSections.forEach(section => {
+            if (!section.fields) return;
+
+            section.fields.forEach((field: any) => {
+
+                // É relation? Tem um ID salvo?
+                if (field.type === 'relation' && this.dynamicValues[field.property]) {
+
+                    const savedId = this.dynamicValues[field.property];
+                    const key = field.property;
+
+                    // 1. Garante que o estado existe na memória
+                    if (!this.relationState[key]) {
+                        this.relationState[key] = {
+                            options: [],
+                            open: false,
+                            loading: false,
+                            selectedLabel: null // Começa nulo
+                        };
+                    }
+
+                    // 2. Se já temos o label carregado, não faz nada (Cache simples)
+                    if (this.relationState[key].selectedLabel) return;
+
+                    // 3. Define um label temporário visual (opcional)
+                    this.relationState[key].selectedLabel = `Carregando ID ${savedId}...`;
+
+                    // 4. Chama a ponte
+                    if (this.control && this.control.getRelationLabel) {
+                        this.control.getRelationLabel(field.class, savedId)
+                            .then((res: any) => {
+                                // Sucesso: Atualiza o texto visual
+                                this.relationState[key].selectedLabel = res.label;
+
+                                // Força o Angular a desenhar de novo (importante em async)
+                                this.cdr.detectChanges();
+                            })
+                            .catch((err: any) => {
+                                console.error("Erro ao recuperar label", err);
+                                this.relationState[key].selectedLabel = `ID: ${savedId} (Erro)`;
+                            });
+                    } else {
+                        console.warn("Função getRelationLabel não definida na ponte!");
+                    }
+                }
+            });
+        });
+    }
+
     private prepareFormSections(schema: any) {
         this.uiConfigSections = []; // Limpa anterior
 

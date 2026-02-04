@@ -391,11 +391,28 @@ button {
     border-radius: 6px;
     font-weight: 500;
     transition: all 0.2s;
+
+    /* CONFIGURAÇÃO DE FLEXBOX */
     display: flex;
     align-items: center;
+    /* Centraliza verticalmente o ícone com o texto */
     justify-content: flex-start;
     gap: 8px;
     font-size: 14px;
+
+    /* --- NOVAS REGRAS PARA TEXTO LONGO --- */
+    white-space: normal;
+    /* Permite que o texto quebre de linha */
+    height: auto;
+    /* Permite que o botão cresça na altura */
+    min-height: 42px;
+    /* Altura mínima para botões com texto curto não ficarem espremidos */
+    text-align: left;
+    /* Alinha o texto à esquerda (fica melhor em multilinhas) */
+    line-height: 1.3;
+    /* Espaçamento entre as linhas para ficar legível */
+    word-break: break-word;
+    /* Garante que palavras gigantes não vazem da caixa */
 }
 
 button:hover:not([disabled]) {

@@ -135,32 +135,30 @@
                                             </label>
 
                                             <input *ngIf="field.type === 'text'" type="text"
-                                                [(ngModel)]="dynamicValues[field.name]"
+                                                [(ngModel)]="dynamicValues[field.property]"
                                                 [placeholder]="field.placeholder || ''">
 
                                             <input *ngIf="field.type === 'number'" type="number"
-                                                [(ngModel)]="dynamicValues[field.name]"
+                                                [(ngModel)]="dynamicValues[field.property]"
                                                 [placeholder]="field.placeholder || ''">
 
                                             <input *ngIf="field.type === 'date'" type="date"
-                                                [(ngModel)]="dynamicValues[field.name]">
+                                                [(ngModel)]="dynamicValues[field.property]">
 
                                             <div *ngIf="field.type === 'boolean'"
                                                 style="display:flex; align-items:center; gap:10px;">
-                                                <input type="checkbox" [(ngModel)]="dynamicValues[field.name]"
+                                                <input type="checkbox" [(ngModel)]="dynamicValues[field.property]"
                                                     style="width:auto; margin:0;">
                                                 <span style="color:#666; font-size:13px;">{{ field.placeholder ||
                                                     'Ativar?' }}</span>
                                             </div>
 
                                             <textarea *ngIf="field.type === 'textarea'"
-                                                [(ngModel)]="dynamicValues[field.name]" rows="4"
+                                                [(ngModel)]="dynamicValues[field.property]" rows="4"
                                                 [placeholder]="field.placeholder || ''"></textarea>
 
                                             <div *ngIf="field.type === 'relation'" class="relation-wrapper">
-
                                                 <div class="relation-input" (click)="toggleRelation(field)">
-
                                                     <span>
                                                         {{ relationState[field.property]?.selectedLabel
                                                         || dynamicValues[field.property]
@@ -172,24 +170,20 @@
 
                                                 <div class="relation-dropdown"
                                                     *ngIf="relationState[field.property]?.open">
-
                                                     <input type="text" class="relation-search" placeholder="Buscar..."
                                                         autofocus (input)="onRelationSearch(field, $event)"
                                                         (click)="$event.stopPropagation()">
 
                                                     <ul class="relation-list"
                                                         (scroll)="onRelationScroll(field, $event)">
-
                                                         <li *ngFor="let opt of relationState[field.property]?.options"
                                                             (click)="selectRelationItem(field, opt)">
                                                             {{ opt.label }}
                                                         </li>
-
                                                         <li *ngIf="relationState[field.property]?.loading"
                                                             class="loading-item">
                                                             Carregando... ⏳
                                                         </li>
-
                                                         <li *ngIf="!relationState[field.property]?.loading && relationState[field.property]?.options?.length === 0"
                                                             class="empty-item">
                                                             Nenhum resultado.
@@ -197,8 +191,9 @@
                                                     </ul>
                                                 </div>
                                             </div>
+
                                             <select *ngIf="field.type === 'select'"
-                                                [(ngModel)]="dynamicValues[field.name]">
+                                                [(ngModel)]="dynamicValues[field.property]">
                                                 <option [ngValue]="undefined" disabled>Selecione...</option>
                                                 <option *ngFor="let opt of field.options" [ngValue]="opt.value">{{
                                                     opt.label }}</option>
