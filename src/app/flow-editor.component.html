@@ -79,7 +79,7 @@
                         <select [(ngModel)]="selectedProperty" (change)="onPropertyChange()">
                             <option [ngValue]="null" disabled>Selecione...</option>
                             <option *ngFor="let prop of properties" [ngValue]="prop">
-                                {{ prop.label }} ({{ prop.type }})
+                                {{ prop.label }}
                             </option>
                         </select>
                     </div>
@@ -224,6 +224,32 @@
         <div class="config-footer">
             <button class="cancel-btn" (click)="closeConfig()">Cancelar</button>
             <button class="save-btn" (click)="saveConfiguration()">Salvar Alterações</button>
+        </div>
+    </div>
+    <div class="modal-overlay" *ngIf="modalState.visible">
+        <div class="modal-box">
+
+            <div class="modal-header" [class.warning]="modalState.type === 'confirm'">
+                <span class="modal-icon">
+                    {{ modalState.type === 'confirm' ? '⚠️' : 'ℹ️' }}
+                </span>
+                <h3>{{ modalState.title }}</h3>
+            </div>
+
+            <div class="modal-body">
+                <p>{{ modalState.message }}</p>
+            </div>
+
+            <div class="modal-footer">
+                <button *ngIf="modalState.type === 'confirm'" class="modal-btn cancel" (click)="closeModal()">
+                    Cancelar
+                </button>
+
+                <button class="modal-btn confirm" [class.danger]="modalState.type === 'confirm'"
+                    (click)="confirmModalAction()">
+                    {{ modalState.confirmLabel || 'OK' }}
+                </button>
+            </div>
         </div>
     </div>
 </div>

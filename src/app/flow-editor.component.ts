@@ -17,7 +17,7 @@ export interface FlowTool {
 export interface PropertyOption {
     id: string;
     label: string;
-    type: 'string' | 'number' | 'date' | 'boolean';
+    type: string; // Vamos deixar genérico 'string' para aceitar o input inicial
 }
 
 // Interfaces para o Formulário Dinâmico
@@ -73,6 +73,16 @@ export class FlowEditorComponent implements AfterViewInit {
     public uiConfigSections: any[] = [];
     public configMaximized: boolean = false;
     public relationState: any = {};
+
+    public modalState = {
+        visible: false,
+        type: 'alert', // 'alert' ou 'confirm'
+        title: '',
+        message: '',
+        confirmLabel: 'OK',
+        // Callback: Função que será executada se o usuário clicar em SIM
+        pendingAction: null as (() => void) | null
+    };
 
     selectedCell: Cell | null = null;
     // Controle de Visibilidade das Sidebars
@@ -202,6 +212,45 @@ export class FlowEditorComponent implements AfterViewInit {
 
     public toggleMaximize() {
         this.configMaximized = !this.configMaximized;
+    }
+
+    // Chama um Alerta simples (Substitui alert())
+    private showSystemAlert(title: string, message: string) {
+        this.modalState = {
+            visible: true,
+            type: 'alert',
+            title: title,
+            message: message,
+            confirmLabel: 'OK',
+            pendingAction: null
+        };
+    }
+
+    // Chama uma Confirmação (Substitui confirm())
+    // Recebe uma função 'onConfirm' que será executada só se o usuário aceitar
+    private showSystemConfirm(title: string, message: string, onConfirm: () => void) {
+        this.modalState = {
+            visible: true,
+            type: 'confirm',
+            title: title,
+            message: message,
+            confirmLabel: 'Sim, confirmar',
+            pendingAction: onConfirm
+        };
+    }
+
+    // Chamado pelo botão "Confirmar/OK" do HTML
+    public confirmModalAction() {
+        if (this.modalState.pendingAction) {
+            this.modalState.pendingAction(); // Executa a função guardada
+        }
+        this.closeModal();
+    }
+
+    // Fecha o modal
+    public closeModal() {
+        this.modalState.visible = false;
+        this.modalState.pendingAction = null; // Limpa a memória
     }
 
     /**
@@ -343,6 +392,34 @@ export class FlowEditorComponent implements AfterViewInit {
         this.registerEvents();
     }
 
+    // Converte os tipos do C# (Int32, Decimal, DateTime) para tipos do Editor (number, string, date)
+    private normalizeType(cSharpType: string): string {
+        if (!cSharpType) return 'string';
+
+        const type = cSharpType.toLowerCase();
+
+        // Numéricos
+        if (type.includes('int') ||
+            type.includes('decimal') ||
+            type.includes('double') ||
+            type.includes('float') ||
+            type.includes('byte') ||
+            type.includes('long')) {
+            return 'number';
+        }
+
+        // Datas
+        if (type.includes('date') || type.includes('time'))
+            return 'date';
+
+        // Booleanos
+        if (type.includes('bool'))
+            return 'boolean';
+
+        // Padrão (String, Char, Guid, etc)
+        return 'string';
+    }
+
     public getExportData() {
         // 1. Pega o JSON Completo (Visual + Dados)
         // Esse serve para você salvar no banco e conseguir reabrir o fluxograma identico depois
@@ -411,10 +488,23 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     ngOnChanges(changes: SimpleChanges): void {
+        // Lógica existente do 'control'
         if (changes['control'] && this.control) {
             this.control.getExportData = this.getExportData.bind(this);
             this.control.importData = this.importData.bind(this);
             this.control.clearCanvas = this.clearCanvas.bind(this);
+        }
+
+        if (changes['properties'] && this.properties) {
+
+            this.properties = this.properties.map(prop => {
+                return {
+                    ...prop,
+                    type: this.normalizeType(prop.type)
+                };
+            });
+
+            console.log("Propriedades normalizadas:", this.properties);
         }
     }
 
@@ -684,9 +774,13 @@ export class FlowEditorComponent implements AfterViewInit {
                 this.graph.clearCells();
                 this.graph.fromJSON(jsonData);
                 this.graph.centerContent();
-                alert('Projeto carregado com sucesso!');
+
+                // NOVO ALERTA
+                this.showSystemAlert('Sucesso', 'Projeto carregado com sucesso!');
+
             } catch (error) {
-                alert('Erro ao carregar arquivo. Verifique se é um JSON válido.');
+                // NOVO ALERTA DE ERRO
+                this.showSystemAlert('Erro', 'Erro ao carregar arquivo. Verifique se é um JSON válido.');
             }
         };
         reader.readAsText(file);
@@ -694,9 +788,14 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     clearCanvas() {
-        if (confirm('Tem certeza que deseja limpar todo o fluxo?')) {
-            this.graph.clearCells();
-        }
+        this.showSystemConfirm(
+            'Limpar Fluxo',
+            'Tem certeza que deseja apagar todo o fluxo? Esta ação não pode ser desfeita.',
+            () => {
+                // Esta função anônima só roda se clicar em "Sim"
+                this.graph.clearCells();
+            }
+        );
     }
 
     exportGraph() {
