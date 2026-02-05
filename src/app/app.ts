@@ -37,18 +37,25 @@ export class AppComponent {
         {
             type: 'slack',
             fields: [
-                { name: 'channel', label: 'Canal (#)', type: 'text', placeholder: '#geral', required: true },
-                { name: 'msg', label: 'Mensagem', type: 'textarea' }
+                // Troque 'name' por 'property' 👇
+                { property: 'channel', label: 'Canal (#)', type: 'text', placeholder: 'Ex: #geral', required: true },
+                { property: 'msg', label: 'Mensagem', type: 'textarea' }
             ]
         },
         {
             type: 'email',
             fields: [
-                { name: 'destinatario', label: 'Para:', type: 'text' },
-                { name: 'assunto', label: 'Assunto', type: 'text' },
+                // Troque 'name' por 'property' 👇
+                { property: 'destinatario', label: 'Para:', type: 'text' },
+                { property: 'assunto', label: 'Assunto', type: 'text' },
                 {
-                    name: 'prioridade', label: 'Prioridade', type: 'select',
-                    options: [{ label: 'Alta', value: 1 }, { label: 'Baixa', value: 0 }]
+                    property: 'prioridade', // Troque 'name' por 'property' aqui também
+                    label: 'Prioridade',
+                    type: 'select',
+                    options: [
+                        { label: 'Alta', value: 1 },
+                        { label: 'Normal', value: 2 }
+                    ]
                 }
             ]
         }

@@ -229,10 +229,12 @@
     <div class="modal-overlay" *ngIf="modalState.visible">
         <div class="modal-box">
 
-            <div class="modal-header" [class.warning]="modalState.type === 'confirm'">
+            <div class="modal-header" [class.warning]="modalState.type === 'confirm' || modalState.type === 'warning'">
+
                 <span class="modal-icon">
-                    {{ modalState.type === 'confirm' ? '⚠️' : 'ℹ️' }}
+                    {{ (modalState.type === 'confirm' || modalState.type === 'warning') ? '⚠️' : 'ℹ️' }}
                 </span>
+
                 <h3>{{ modalState.title }}</h3>
             </div>
 

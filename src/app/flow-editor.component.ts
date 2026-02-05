@@ -22,17 +22,37 @@ export interface PropertyOption {
 
 // Interfaces para o Formulário Dinâmico
 export interface ToolField {
-    name: string;
+    // Agora usamos 'property' como chave principal, mas mantemos 'name' para compatibilidade se precisar
+    property: string;
+    name?: string;
+
     label: string;
-    type: 'text' | 'number' | 'select' | 'boolean' | 'textarea' | 'date';
+    type: 'text' | 'number' | 'select' | 'boolean' | 'textarea' | 'date' | 'relation'; // Adicionado 'relation'
     placeholder?: string;
     required?: boolean;
+
+    // Para selects
     options?: { label: string; value: any }[];
+
+    // Para relations
+    class?: string;   // Ex: 'Usuario', 'Cliente'
+    filter?: any;     // Ex: { status: 'ativo' }
+}
+
+export interface ToolSection {
+    title: string;
+    fields: ToolField[];
+    expanded?: boolean; // Se começa aberta ou fechada
 }
 
 export interface ToolSchema {
     type: string;        // ID da ferramenta (ex: 'slack')
-    fields: ToolField[]; // Campos do formulário
+
+    // Pode ter campos soltos (Formato Antigo)
+    fields?: ToolField[];
+
+    // OU pode ter seções organizadas (Formato Novo)
+    sections?: ToolSection[];
 }
 
 // Interface do JSON final para o Backend
@@ -214,16 +234,84 @@ export class FlowEditorComponent implements AfterViewInit {
         this.configMaximized = !this.configMaximized;
     }
 
-    // Chama um Alerta simples (Substitui alert())
-    private showSystemAlert(title: string, message: string) {
+    validateProject(): boolean {
+        const nodes = this.graph.getNodes();
+
+        for (const node of nodes) {
+            const data = node.getData();
+
+            // Ignora nó de início
+            if (data.type === 'start') continue;
+
+            // --- VALIDAÇÃO DE IF (DECISÃO) ---
+            if (data.type === 'if') {
+                const condition = data.conditionData;
+                // Verifica se configurou a regra
+                if (!condition || !condition.propertyId || !condition.operator) {
+                    this.handleValidationError(node, 'O nó de Decisão (IF) precisa ter uma regra configurada (Propriedade e Operador).');
+                    return false;
+                }
+            }
+
+            // --- VALIDAÇÃO DE CAMPOS GENÉRICOS (Formulários) ---
+            else {
+                const schema = this.schemas.find(s => s.type === data.type);
+                if (schema) {
+                    // Junta campos soltos e campos de seções num array só
+                    let allFields: any[] = [];
+                    if (schema.sections) {
+                        schema.sections.forEach((s: any) => allFields = [...allFields, ...s.fields]);
+                    } else if (schema.fields) {
+                        allFields = schema.fields;
+                    }
+
+                    const config = data.config || {};
+
+                    for (const field of allFields) {
+                        // Se for obrigatório (required: true)
+                        if (field.required) {
+                            const value = config[field.property]; // Busca pelo ID da propriedade
+
+                            // Verifica se está vazio (null, undefined, string vazia ou array vazio)
+                            const isEmpty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
+
+                            if (isEmpty) {
+                                // Monta a mensagem amigável
+                                const msg = `O campo "${field.label}" na etapa "${data.label}" é obrigatório e não foi preenchido.`;
+
+                                // Chama o erro visual
+                                this.handleValidationError(node, msg);
+
+                                return false; // Para a validação no primeiro erro
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return true; // Se chegou aqui, está tudo preenchido!
+    }
+
+    // Auxiliar para focar no erro e mostrar o Modal
+    handleValidationError(node: any, message: string) {
+        this.selectCell(node);
+        this.graph.centerCell(node);
+
+        // MUDANÇA AQUI: Passamos 'warning' como terceiro parâmetro
+        this.showSystemAlert('Dados Incompletos', message, 'warning');
+    }
+
+    // Helper para abrir o Modal de Alerta
+    private showSystemAlert(title: string, message: string, type: string = 'info') {
         this.modalState = {
             visible: true,
-            type: 'alert',
+            type: type, // Agora passamos o tipo (ex: 'warning')
             title: title,
             message: message,
-            confirmLabel: 'OK',
+            confirmLabel: 'Entendi',
             pendingAction: null
         };
+        this.cdr.detectChanges();
     }
 
     // Chama uma Confirmação (Substitui confirm())
@@ -250,7 +338,8 @@ export class FlowEditorComponent implements AfterViewInit {
     // Fecha o modal
     public closeModal() {
         this.modalState.visible = false;
-        this.modalState.pendingAction = null; // Limpa a memória
+        this.modalState.pendingAction = null;
+        this.cdr.detectChanges();
     }
 
     /**
@@ -421,27 +510,44 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     public getExportData() {
-        // 1. Pega o JSON Completo (Visual + Dados)
-        // Esse serve para você salvar no banco e conseguir reabrir o fluxograma identico depois
+        // ------------------------------------------------------------------
+        // 1. O GUARDIÃO: Valida antes de gerar qualquer coisa
+        // ------------------------------------------------------------------
+        // Se a validação falhar, o método validateProject() já vai abrir o Modal
+        // e focar no nó com erro. Nós só precisamos parar a execução aqui.
+        if (!this.validateProject()) {
+            console.warn("⛔ Exportação cancelada: O fluxo possui erros de validação.");
+            return null; // Retorna NULL para avisar quem chamou que deu erro
+        }
+
+        // ------------------------------------------------------------------
+        // 2. GERAÇÃO DOS DADOS (Só acontece se não houve erro)
+        // ------------------------------------------------------------------
+
+        // Pega o JSON Visual Completo (para recarregar o desenho depois)
         const fullGraph = this.graph.toJSON();
 
-        // 2. Pega o JSON de Lógica (Limpo)
-        // Esse serve para o seu backend processar o fluxo (C#, Node, etc)
+        // Pega o JSON de Lógica Limpo (para o Backend C# processar)
         const logicData = {
             nodes: fullGraph.cells
                 .filter((cell: any) => cell.shape !== 'edge') // Pega só os nós
                 .map((node: any) => ({
                     id: node.id,
-                    type: node.data?.type,    // Ex: 'action', 'if', 'start'
-                    label: node.data?.label,  // O nome visual
-                    config: node.data         // Os valores preenchidos (formulários)
+                    type: node.data?.type,
+                    label: node.data?.label,
+
+                    // Lógica para pegar a configuração correta dependendo do tipo
+                    config: node.data?.type === 'if'
+                        ? (node.data.conditionData || {}) // Se for IF, pega conditionData
+                        : (node.data?.config || {})       // Se for Ação, pega config
                 })),
+
             edges: fullGraph.cells
                 .filter((cell: any) => cell.shape === 'edge') // Pega só as linhas
                 .map((edge: any) => ({
-                    source: edge.source.cell, // ID do nó de origem
-                    target: edge.target.cell, // ID do nó de destino
-                    sourcePort: edge.source.port, // Qual bolinha saiu (útil para IFs)
+                    source: edge.source.cell,
+                    target: edge.target.cell,
+                    sourcePort: edge.source.port, // Importante para saber se saiu do True ou False
                 }))
         };
 
@@ -450,7 +556,11 @@ export class FlowEditorComponent implements AfterViewInit {
             graph: fullGraph
         };
 
-        console.log('📦 Dados Gerados:', result);
+        console.log('📦 Dados Gerados e Validados com Sucesso:', result);
+
+        // (Opcional) Mostra um alerta de sucesso se quiser, ou deixa o legado avisar
+        // this.showSystemAlert('Sucesso', 'Dados gerados corretamente!');
+
         return result;
     }
 

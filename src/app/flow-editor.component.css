@@ -8,6 +8,11 @@
     background-color: #f8f9fa;
 }
 
+.modal-header.warning .modal-icon,
+.modal-header.warning h3 {
+    color: #faad14;
+}
+
 /* --- MODAL DE SISTEMA --- */
 .modal-overlay {
     position: fixed;
