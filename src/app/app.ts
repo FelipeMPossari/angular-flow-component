@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
-import { FlowEditorComponent, FlowTool, PropertyOption, ToolSchema } from './flow-editor.component';
+import { FlowEditorComponent } from './flow-editor.component';
+import { FlowTool, PropertyOption, ToolSchema } from './flow.models';
 
 @Component({
     selector: 'app-root',

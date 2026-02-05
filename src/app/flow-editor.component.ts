@@ -4,71 +4,13 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Graph, Shape, Cell } from '@antv/x6';
+import { Graph, Cell } from '@antv/x6';
 
-// --- INTERFACES DE DADOS ---
-
-export interface FlowTool {
-    id: string;
-    label: string;
-    icon?: string;
-}
-
-export interface PropertyOption {
-    id: string;
-    label: string;
-    type: string; // Vamos deixar genérico 'string' para aceitar o input inicial
-}
-
-// Interfaces para o Formulário Dinâmico
-export interface ToolField {
-    // Agora usamos 'property' como chave principal, mas mantemos 'name' para compatibilidade se precisar
-    property: string;
-    name?: string;
-
-    label: string;
-    type: 'text' | 'number' | 'select' | 'boolean' | 'textarea' | 'date' | 'relation'; // Adicionado 'relation'
-    placeholder?: string;
-    required?: boolean;
-
-    // Para selects
-    options?: { label: string; value: any }[];
-
-    // Para relations
-    class?: string;   // Ex: 'Usuario', 'Cliente'
-    filter?: any;     // Ex: { status: 'ativo' }
-}
-
-export interface ToolSection {
-    title: string;
-    fields: ToolField[];
-    expanded?: boolean; // Se começa aberta ou fechada
-}
-
-export interface ToolSchema {
-    type: string;        // ID da ferramenta (ex: 'slack')
-
-    // Pode ter campos soltos (Formato Antigo)
-    fields?: ToolField[];
-
-    // OU pode ter seções organizadas (Formato Novo)
-    sections?: ToolSection[];
-}
-
-// Interface do JSON final para o Backend
-export interface WorkflowNode {
-    id: string;
-    type: string;
-    config?: any;
-    next?: string;
-    nextTrue?: string;
-    nextFalse?: string;
-}
-
-export interface WorkflowDefinition {
-    startNodeId: string | null;
-    nodes: WorkflowNode[];
-}
+// Imports dos nossos arquivos auxiliares
+import * as Models from './flow.models';
+import { getGraphOptions, LABEL_STYLE, PORT_GROUPS, validateConnectionRule } from './flow-graph.config';
+import { FlowUtils } from './flow.utils';         // <--- NOVO
+import { OPERATORS_BY_TYPE } from './flow.constants'; // <--- NOVO
 
 @Component({
     selector: 'app-flow-editor',
@@ -80,525 +22,46 @@ export interface WorkflowDefinition {
 export class FlowEditorComponent implements AfterViewInit {
     @ViewChild('container', { static: true }) container!: ElementRef;
 
-    // --- INPUTS (O Pai fornece) ---
-    @Input() tools: FlowTool[] = [];
-    @Input() properties: PropertyOption[] = [];
-    @Input() schemas: ToolSchema[] = []; // Schemas dos formulários dinâmicos
+    // --- INPUTS & OUTPUTS ---
+    @Input() tools: Models.FlowTool[] = [];
+    @Input() properties: Models.PropertyOption[] = [];
+    @Input() schemas: Models.ToolSchema[] = [];
     @Input() control: any;
+    @Output() saveGraph = new EventEmitter<Models.WorkflowDefinition>();
 
-    // --- OUTPUT (Para o Pai) ---
-    @Output() saveGraph = new EventEmitter<WorkflowDefinition>();
-
+    // --- ESTADO ---
     private graph!: Graph;
-    public uiConfigSections: any[] = [];
-    public configMaximized: boolean = false;
-    public relationState: any = {};
-
-    public modalState = {
-        visible: false,
-        type: 'alert', // 'alert' ou 'confirm'
-        title: '',
-        message: '',
-        confirmLabel: 'OK',
-        // Callback: Função que será executada se o usuário clicar em SIM
-        pendingAction: null as (() => void) | null
-    };
-
     selectedCell: Cell | null = null;
-    // Controle de Visibilidade das Sidebars
-    showActions = true;  // Sidebar Esquerda (Ferramentas)
-    showConfig = false; // Sidebar Direita (Configuração)
 
+    // UI
+    showActions = true;
+    showConfig = false;
+    configMaximized = false;
+    uiConfigSections: Models.ToolSection[] = [];
+
+    modalState: Models.ModalState = { visible: false, type: 'alert', title: '', message: '', confirmLabel: 'OK', pendingAction: null };
+
+    // Edição
     editingNode: any = null;
+    editingNodeLabel: string = '';
+    dynamicValues: any = {};
+    currentSchema: Models.ToolSchema | null = null;
 
-    // --- VARIÁVEIS PARA EDIÇÃO DO 'IF' ---
-    selectedProperty: PropertyOption | null = null;
+    // IF e Relations
+    selectedProperty: Models.PropertyOption | null = null;
     selectedOperator: string = '';
     conditionValue: any = '';
-
-    operatorsByType: any = {
-        string: [{ id: 'eq', label: 'Igual a' }, { id: 'contains', label: 'Contém' }, { id: 'ne', label: 'Diferente de' }],
-        number: [{ id: 'eq', label: '=' }, { id: 'gt', label: '>' }, { id: 'lt', label: '<' }, { id: 'gte', label: '>=' }],
-        date: [{ id: 'eq', label: 'Em' }, { id: 'before', label: 'Antes de' }, { id: 'after', label: 'Depois de' }],
-        boolean: [{ id: 'true', label: 'É Verdadeiro' }, { id: 'false', label: 'É Falso' }]
-    };
     availableOperators: any[] = [];
-
-    // --- VARIÁVEIS PARA EDIÇÃO DINÂMICA (GENÉRICA) ---
-    currentSchema: ToolSchema | null = null;
-    dynamicValues: any = {};
-    editingNodeLabel: string = '';
+    relationState: any = {};
 
     constructor(private ngZone: NgZone, private cdr: ChangeDetectorRef) { }
 
+    // #region 1. Lifecycle
     ngAfterViewInit() {
         this.initGraph();
     }
 
-    toggleActions() {
-        this.showActions = !this.showActions;
-    }
-
-    loadRelationData(field: any, isScroll = false) {
-        if (!this.control || !this.control.searchRelation) {
-            console.warn("⚠️ Função searchRelation não definida na Ponte (flowAPI)!");
-            return;
-        }
-
-        const key = field.property;
-        const state = this.relationState[key];
-
-        // 2. Proteção contra chamadas duplicadas ou desnecessárias
-        if (state.loading) return;
-        if (isScroll && !state.hasMore) return;
-
-        state.loading = true;
-
-        // 3. Captura os filtros extras definidos no JSON (ex: { status: 'ativo' })
-        const filtrosExtras = field.filter || {};
-
-        // 4. Chamada à Ponte com os 4 parâmetros: Classe, Busca, Página e Filtros
-        this.control.searchRelation(field.class, state.search, state.page, filtrosExtras)
-            .then((response: any) => {
-
-                if (state.page === 1) {
-                    // Primeira página: substitui a lista
-                    state.options = response.items;
-                } else {
-                    // Scroll infinito: concatena na lista existente
-                    state.options = [...state.options, ...response.items];
-                }
-
-                state.hasMore = response.hasMore;
-                state.page++;
-                state.loading = false;
-            })
-            .catch((err: any) => {
-                console.error("Erro ao buscar relation na ponte:", err);
-                state.loading = false;
-            });
-    }
-
-    onRelationSearch(field: any, event: any) {
-        const term = event.target.value;
-        const key = field.property; // MUDANÇA: Chave é 'property'
-        const state = this.relationState[key];
-
-        state.search = term;
-        state.page = 1;
-        state.hasMore = true;
-
-        if (state.timeout) clearTimeout(state.timeout);
-        state.timeout = setTimeout(() => {
-            this.loadRelationData(field);
-        }, 500);
-    }
-
-    onRelationScroll(field: any, event: any) {
-        const element = event.target;
-        if (element.scrollHeight - element.scrollTop <= element.clientHeight + 20) {
-            this.loadRelationData(field, true);
-        }
-    }
-
-    selectRelationItem(field: any, item: any) {
-        const key = field.property; // MUDANÇA: Chave é 'property'
-
-        // MUDANÇA: Salvamos no modelo usando o nome da propriedade
-        this.dynamicValues[key] = item.id;
-
-        this.relationState[key].selectedLabel = item.label;
-        this.relationState[key].open = false;
-    }
-
-    toggleRelation(field: any) {
-        // MUDANÇA: Usamos 'field.property' como chave única do estado
-        const key = field.property;
-
-        if (!this.relationState[key]) {
-            this.relationState[key] = {
-                options: [],
-                page: 1,
-                loading: false,
-                open: false,
-                search: '',
-                hasMore: true
-            };
-            this.loadRelationData(field);
-        }
-
-        this.relationState[key].open = !this.relationState[key].open;
-    }
-
-    public toggleMaximize() {
-        this.configMaximized = !this.configMaximized;
-    }
-
-    validateProject(): boolean {
-        const nodes = this.graph.getNodes();
-
-        for (const node of nodes) {
-            const data = node.getData();
-
-            // Ignora nó de início
-            if (data.type === 'start') continue;
-
-            // --- VALIDAÇÃO DE IF (DECISÃO) ---
-            if (data.type === 'if') {
-                const condition = data.conditionData;
-                // Verifica se configurou a regra
-                if (!condition || !condition.propertyId || !condition.operator) {
-                    this.handleValidationError(node, 'O nó de Decisão (IF) precisa ter uma regra configurada (Propriedade e Operador).');
-                    return false;
-                }
-            }
-
-            // --- VALIDAÇÃO DE CAMPOS GENÉRICOS (Formulários) ---
-            else {
-                const schema = this.schemas.find(s => s.type === data.type);
-                if (schema) {
-                    // Junta campos soltos e campos de seções num array só
-                    let allFields: any[] = [];
-                    if (schema.sections) {
-                        schema.sections.forEach((s: any) => allFields = [...allFields, ...s.fields]);
-                    } else if (schema.fields) {
-                        allFields = schema.fields;
-                    }
-
-                    const config = data.config || {};
-
-                    for (const field of allFields) {
-                        // Se for obrigatório (required: true)
-                        if (field.required) {
-                            const value = config[field.property]; // Busca pelo ID da propriedade
-
-                            // Verifica se está vazio (null, undefined, string vazia ou array vazio)
-                            const isEmpty = value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0);
-
-                            if (isEmpty) {
-                                // Monta a mensagem amigável
-                                const msg = `O campo "${field.label}" na etapa "${data.label}" é obrigatório e não foi preenchido.`;
-
-                                // Chama o erro visual
-                                this.handleValidationError(node, msg);
-
-                                return false; // Para a validação no primeiro erro
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return true; // Se chegou aqui, está tudo preenchido!
-    }
-
-    // Auxiliar para focar no erro e mostrar o Modal
-    handleValidationError(node: any, message: string) {
-        this.selectCell(node);
-        this.graph.centerCell(node);
-
-        // MUDANÇA AQUI: Passamos 'warning' como terceiro parâmetro
-        this.showSystemAlert('Dados Incompletos', message, 'warning');
-    }
-
-    // Helper para abrir o Modal de Alerta
-    private showSystemAlert(title: string, message: string, type: string = 'info') {
-        this.modalState = {
-            visible: true,
-            type: type, // Agora passamos o tipo (ex: 'warning')
-            title: title,
-            message: message,
-            confirmLabel: 'Entendi',
-            pendingAction: null
-        };
-        this.cdr.detectChanges();
-    }
-
-    // Chama uma Confirmação (Substitui confirm())
-    // Recebe uma função 'onConfirm' que será executada só se o usuário aceitar
-    private showSystemConfirm(title: string, message: string, onConfirm: () => void) {
-        this.modalState = {
-            visible: true,
-            type: 'confirm',
-            title: title,
-            message: message,
-            confirmLabel: 'Sim, confirmar',
-            pendingAction: onConfirm
-        };
-    }
-
-    // Chamado pelo botão "Confirmar/OK" do HTML
-    public confirmModalAction() {
-        if (this.modalState.pendingAction) {
-            this.modalState.pendingAction(); // Executa a função guardada
-        }
-        this.closeModal();
-    }
-
-    // Fecha o modal
-    public closeModal() {
-        this.modalState.visible = false;
-        this.modalState.pendingAction = null;
-        this.cdr.detectChanges();
-    }
-
-    /**
- * Varre os campos configurados. Se achar um 'relation' com ID salvo,
- * chama a ponte para descobrir o nome (Label) desse ID.
- */
-    private loadSavedLabels() {
-        if (!this.dynamicValues || !this.uiConfigSections) return;
-
-        // Varre todas as seções e campos
-        this.uiConfigSections.forEach(section => {
-            if (!section.fields) return;
-
-            section.fields.forEach((field: any) => {
-
-                // É relation? Tem um ID salvo?
-                if (field.type === 'relation' && this.dynamicValues[field.property]) {
-
-                    const savedId = this.dynamicValues[field.property];
-                    const key = field.property;
-
-                    // 1. Garante que o estado existe na memória
-                    if (!this.relationState[key]) {
-                        this.relationState[key] = {
-                            options: [],
-                            open: false,
-                            loading: false,
-                            selectedLabel: null // Começa nulo
-                        };
-                    }
-
-                    // 2. Se já temos o label carregado, não faz nada (Cache simples)
-                    if (this.relationState[key].selectedLabel) return;
-
-                    // 3. Define um label temporário visual (opcional)
-                    this.relationState[key].selectedLabel = `Carregando ID ${savedId}...`;
-
-                    // 4. Chama a ponte
-                    if (this.control && this.control.getRelationLabel) {
-                        this.control.getRelationLabel(field.class, savedId)
-                            .then((res: any) => {
-                                // Sucesso: Atualiza o texto visual
-                                this.relationState[key].selectedLabel = res.label;
-
-                                // Força o Angular a desenhar de novo (importante em async)
-                                this.cdr.detectChanges();
-                            })
-                            .catch((err: any) => {
-                                console.error("Erro ao recuperar label", err);
-                                this.relationState[key].selectedLabel = `ID: ${savedId} (Erro)`;
-                            });
-                    } else {
-                        console.warn("Função getRelationLabel não definida na ponte!");
-                    }
-                }
-            });
-        });
-    }
-
-    private prepareFormSections(schema: any) {
-        this.uiConfigSections = []; // Limpa anterior
-
-        if (!schema) return;
-
-        // CENÁRIO A: O JSON já tem seções (Formato Novo)
-        // Esperamos algo como: { type: 'email', sections: [ { title: 'Geral', fields: [] } ] }
-        if (schema.sections && Array.isArray(schema.sections)) {
-            this.uiConfigSections = schema.sections;
-        }
-        // CENÁRIO B: O JSON é antigo (só tem 'fields')
-        // A gente cria uma seção "Geral" falsa para não quebrar o layout
-        else if (schema.fields && Array.isArray(schema.fields)) {
-            this.uiConfigSections = [
-                {
-                    title: 'Configurações Gerais',
-                    fields: schema.fields,
-                    expanded: true // Para vir aberto por padrão
-                }
-            ];
-        }
-    }
-
-    private initGraph() {
-        this.graph = new Graph({
-            container: this.container.nativeElement,
-            grid: { size: 20, visible: true, type: 'mesh', args: { color: '#e0e0e0' } },
-            panning: true,
-            mousewheel: { enabled: true, modifiers: ['ctrl', 'meta'] },
-            connecting: {
-                router: 'manhattan',
-                connector: { name: 'rounded', args: { radius: 8 } },
-                anchor: 'center',
-                connectionPoint: 'boundary',
-                snap: true,
-                allowBlank: false,
-                highlight: true,
-
-                // --- VALIDAÇÃO DE CONEXÕES ---
-                validateConnection: ({ sourceView, targetView, sourceMagnet, targetMagnet }) => {
-                    if (!sourceMagnet || !targetMagnet || !sourceView || !targetView) return false;
-
-                    const sourceGroup = sourceMagnet.getAttribute('port-group');
-                    const targetGroup = targetMagnet.getAttribute('port-group');
-
-                    // 1. Sentido Obrigatório: Saída -> Entrada
-                    if (sourceGroup === 'in') return false;
-                    if (targetGroup !== 'in') return false;
-
-                    // 2. Unicidade: Não permitir duplicar a mesma conexão
-                    const sourcePortId = sourceMagnet.getAttribute('port');
-                    const targetPortId = targetMagnet.getAttribute('port');
-                    const targetNodeId = targetView.cell.id;
-
-                    const outgoingEdges = this.graph.getOutgoingEdges(sourceView.cell);
-                    if (outgoingEdges) {
-                        const isDuplicate = outgoingEdges.some(edge => {
-                            const target = edge.getTargetCell();
-                            if (target && target.id === targetNodeId) {
-                                return edge.getTargetPortId() === targetPortId && edge.getSourcePortId() === sourcePortId;
-                            }
-                            return false;
-                        });
-                        if (isDuplicate) return false;
-                    }
-
-                    return true;
-                },
-                createEdge() {
-                    return new Shape.Edge({
-                        attrs: {
-                            line: { stroke: '#5F95FF', strokeWidth: 2, targetMarker: { name: 'block', width: 12, height: 8 } }
-                        },
-                        zIndex: 0
-                    });
-                },
-            },
-        });
-
-        this.registerEvents();
-    }
-
-    // Converte os tipos do C# (Int32, Decimal, DateTime) para tipos do Editor (number, string, date)
-    private normalizeType(cSharpType: string): string {
-        if (!cSharpType) return 'string';
-
-        const type = cSharpType.toLowerCase();
-
-        // Numéricos
-        if (type.includes('int') ||
-            type.includes('decimal') ||
-            type.includes('double') ||
-            type.includes('float') ||
-            type.includes('byte') ||
-            type.includes('long')) {
-            return 'number';
-        }
-
-        // Datas
-        if (type.includes('date') || type.includes('time'))
-            return 'date';
-
-        // Booleanos
-        if (type.includes('bool'))
-            return 'boolean';
-
-        // Padrão (String, Char, Guid, etc)
-        return 'string';
-    }
-
-    public getExportData() {
-        // ------------------------------------------------------------------
-        // 1. O GUARDIÃO: Valida antes de gerar qualquer coisa
-        // ------------------------------------------------------------------
-        // Se a validação falhar, o método validateProject() já vai abrir o Modal
-        // e focar no nó com erro. Nós só precisamos parar a execução aqui.
-        if (!this.validateProject()) {
-            console.warn("⛔ Exportação cancelada: O fluxo possui erros de validação.");
-            return null; // Retorna NULL para avisar quem chamou que deu erro
-        }
-
-        // ------------------------------------------------------------------
-        // 2. GERAÇÃO DOS DADOS (Só acontece se não houve erro)
-        // ------------------------------------------------------------------
-
-        // Pega o JSON Visual Completo (para recarregar o desenho depois)
-        const fullGraph = this.graph.toJSON();
-
-        // Pega o JSON de Lógica Limpo (para o Backend C# processar)
-        const logicData = {
-            nodes: fullGraph.cells
-                .filter((cell: any) => cell.shape !== 'edge') // Pega só os nós
-                .map((node: any) => ({
-                    id: node.id,
-                    type: node.data?.type,
-                    label: node.data?.label,
-
-                    // Lógica para pegar a configuração correta dependendo do tipo
-                    config: node.data?.type === 'if'
-                        ? (node.data.conditionData || {}) // Se for IF, pega conditionData
-                        : (node.data?.config || {})       // Se for Ação, pega config
-                })),
-
-            edges: fullGraph.cells
-                .filter((cell: any) => cell.shape === 'edge') // Pega só as linhas
-                .map((edge: any) => ({
-                    source: edge.source.cell,
-                    target: edge.target.cell,
-                    sourcePort: edge.source.port, // Importante para saber se saiu do True ou False
-                }))
-        };
-
-        const result = {
-            logic: logicData,
-            graph: fullGraph
-        };
-
-        console.log('📦 Dados Gerados e Validados com Sucesso:', result);
-
-        // (Opcional) Mostra um alerta de sucesso se quiser, ou deixa o legado avisar
-        // this.showSystemAlert('Sucesso', 'Dados gerados corretamente!');
-
-        return result;
-    }
-
-    /**
-   * Recebe o JSON completo (formato X6/Graph) e desenha na tela.
-   * @param data Pode ser um Objeto JSON ou uma String JSON.
-   */
-    public importData(data: any) {
-        console.log("📥 Recebendo dados para importação...", data);
-
-        try {
-            // 1. Garante que é um objeto (se vier string do banco, converte)
-            const graphData = typeof data === 'string' ? JSON.parse(data) : data;
-
-            // 2. Verifica se o JSON é válido para o X6
-            // (Geralmente o JSON salvo tem a propriedade 'cells')
-            if (!graphData || (!graphData.cells && !Array.isArray(graphData))) {
-                console.warn("⚠️ O JSON fornecido não parece ser um gráfico válido do X6.");
-                return false;
-            }
-
-            // 3. Carrega no Gráfico (O X6 faz a mágica)
-            this.graph.fromJSON(graphData);
-
-            // 4. Centraliza o conteúdo para ficar bonito
-            this.graph.zoomToFit({ padding: 20, maxScale: 1 });
-
-            console.log("✅ Importação concluída com sucesso!");
-            return true;
-
-        } catch (error) {
-            console.error("❌ Erro ao importar dados:", error);
-            return false;
-        }
-    }
-
     ngOnChanges(changes: SimpleChanges): void {
-        // Lógica existente do 'control'
         if (changes['control'] && this.control) {
             this.control.getExportData = this.getExportData.bind(this);
             this.control.importData = this.importData.bind(this);
@@ -606,158 +69,95 @@ export class FlowEditorComponent implements AfterViewInit {
         }
 
         if (changes['properties'] && this.properties) {
-
-            this.properties = this.properties.map(prop => {
-                return {
-                    ...prop,
-                    type: this.normalizeType(prop.type)
-                };
-            });
-
-            console.log("Propriedades normalizadas:", this.properties);
+            this.properties = this.properties.map(prop => ({
+                ...prop,
+                type: FlowUtils.normalizeType(prop.type) // <--- Usando Utils
+            }));
         }
+    }
+
+    private initGraph() {
+        const options = getGraphOptions(this.container.nativeElement);
+        options.connecting.validateConnection = (args: any) => validateConnectionRule({ ...args, graph: this.graph });
+        this.graph = new Graph(options);
+        this.registerEvents();
     }
 
     private registerEvents() {
         this.graph.on('node:click', ({ node }) => this.ngZone.run(() => this.selectCell(node)));
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
+        this.graph.on('node:dblclick', ({ node }) => this.ngZone.run(() => { this.openConfigSidebar(node); this.cdr.detectChanges(); }));
 
-        // Clique Duplo: Abre Sidebar de Configuração (Para qualquer nó)
-        this.graph.on('node:dblclick', ({ node }) => {
-            this.ngZone.run(() => {
-                this.openConfigSidebar(node);
-                this.cdr.detectChanges();
-            });
-        });
-
-        // Ferramenta de deletar na aresta (hover)
         this.graph.on('edge:mouseenter', ({ edge }) => {
             edge.addTools([{ name: 'button-remove', args: { distance: '50%', offset: 0, onClick: () => edge.remove() } }]);
         });
         this.graph.on('edge:mouseleave', ({ edge }) => edge.removeTools());
     }
+    // #endregion
 
-    // --- CRIAÇÃO DE NÓS ---
+    // #region 2. Nós (Add/Drag)
     addNode(type: string, toolLabel?: string, position?: { x: number, y: number }) {
-
-        // Se passou posição (drop), usa ela. Se não (clique), gera aleatório.
         const x = position ? position.x : 100 + Math.random() * 200;
         const y = position ? position.y : 100 + Math.random() * 200;
+        const finalX = position ? x - 80 : x;
+        const finalY = position ? y - 35 : y;
 
-        const nodeWidth = 160;
-        const nodeHeight = 70;
-
-        // Centraliza o nó no mouse quando soltar (opcional, ajusta o pivô para o centro)
-        const finalX = position ? x - (nodeWidth / 2) : x;
-        const finalY = position ? y - (nodeHeight / 2) : y;
-
-        const labelStyle = {
-            fill: '#333', fontSize: 14, fontFamily: 'Segoe UI', fontWeight: 600,
-            textAnchor: 'middle', refX: 0.5, refY: 0.5,
-            textWrap: { width: nodeWidth - 20, height: nodeHeight - 10, ellipsis: true, breakWord: false }
-        };
+        const commonAttrs = { label: { text: toolLabel || (type === 'if' ? 'IF' : type), ...LABEL_STYLE } };
 
         if (type === 'if') {
             this.graph.addNode({
-                x: finalX, y: finalY, width: nodeWidth, height: nodeHeight, // Usa finalX/Y
+                x: finalX, y: finalY, width: 160, height: 70,
                 data: { type: 'if' },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
-                attrs: {
-                    body: { fill: '#fffbe6', stroke: '#faad14', strokeWidth: 2, rx: 6, ry: 6 },
-                    label: { text: 'IF', ...labelStyle }
-                },
-                ports: {
-                    groups: {
-                        in: { position: 'left', attrs: { circle: { r: 5, magnet: true, stroke: '#faad14', fill: '#fff', strokeWidth: 2 } } },
-                        trueOut: { position: 'right', attrs: { circle: { r: 5, magnet: true, stroke: '#52c41a', fill: '#f6ffed', strokeWidth: 2 } } },
-                        falseOut: { position: 'bottom', attrs: { circle: { r: 5, magnet: true, stroke: '#ff4d4f', fill: '#fff1f0', strokeWidth: 2 } } },
-                    },
-                    items: [{ group: 'in', id: 'in' }, { group: 'trueOut', id: 'trueOut' }, { group: 'falseOut', id: 'falseOut' }],
-                },
+                attrs: { body: { fill: '#fffbe6', stroke: '#faad14', strokeWidth: 2, rx: 6, ry: 6 }, ...commonAttrs },
+                ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'trueOut', id: 'trueOut' }, { group: 'falseOut', id: 'falseOut' }] },
             });
-            return;
+        } else {
+            this.graph.addNode({
+                x: finalX, y: finalY, width: 160, height: 70,
+                data: { type: type, label: toolLabel || type },
+                markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
+                attrs: { body: { fill: '#ffffff', stroke: '#ccc', strokeWidth: 2, strokeDasharray: '5,5', rx: 6, ry: 6 }, ...commonAttrs },
+                ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'out', id: 'out' }] },
+            });
         }
-
-        this.graph.addNode({
-            x: finalX, y: finalY, width: nodeWidth, height: nodeHeight, // Usa finalX/Y
-            data: { type: type, label: toolLabel || type },
-            markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
-            attrs: {
-                body: {
-                    fill: '#ffffff', stroke: '#ccc', strokeWidth: 2, strokeDasharray: '5,5',
-                    rx: 6, ry: 6, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.05))'
-                },
-                label: { text: toolLabel || type, ...labelStyle }
-            },
-            ports: {
-                groups: {
-                    in: { position: 'left', attrs: { circle: { r: 5, magnet: true, stroke: '#5F95FF', fill: '#fff', strokeWidth: 2 } } },
-                    out: { position: 'right', attrs: { circle: { r: 5, magnet: true, stroke: '#5F95FF', fill: '#fff', strokeWidth: 2 } } },
-                },
-                items: [{ group: 'in', id: 'in' }, { group: 'out', id: 'out' }],
-            },
-        });
     }
 
-    // --- 2. NOVOS MÉTODOS PARA DRAG AND DROP ---
-
     onDragStart(event: DragEvent, type: string, label: string = '') {
-        if (event.dataTransfer) {
-            // Guarda os dados do botão que está sendo arrastado
-            event.dataTransfer.setData('application/json', JSON.stringify({ type, label }));
-            event.dataTransfer.effectAllowed = 'copy';
-
-            // Opcional: Define uma imagem "fantasma" personalizada se quiser
-            // event.dataTransfer.setDragImage(imgElement, 0, 0);
-        }
+        event.dataTransfer?.setData('application/json', JSON.stringify({ type, label }));
     }
 
     onDragOver(event: DragEvent) {
-        // É OBRIGATÓRIO prevenir o default para permitir o Drop
         event.preventDefault();
-        if (event.dataTransfer) {
-            event.dataTransfer.dropEffect = 'copy';
-        }
     }
 
     onDrop(event: DragEvent) {
         event.preventDefault();
-        if (!event.dataTransfer) return;
-
-        const dataString = event.dataTransfer.getData('application/json');
+        const dataString = event.dataTransfer?.getData('application/json');
         if (!dataString) return;
-
         try {
             const { type, label } = JSON.parse(dataString);
-
-            // A MÁGICA: Converte coordenadas da tela (px) para coordenadas do grafo (X6)
-            // Isso considera zoom, pan e scroll
             const { x, y } = this.graph.clientToLocal(event.clientX, event.clientY);
-
             this.addNode(type, label, { x, y });
-        } catch (e) {
-            console.error('Erro ao processar drop', e);
-        }
+        } catch (e) { console.error(e); }
     }
+    // #endregion
 
-    // --- LÓGICA DO MENU LATERAL DE CONFIGURAÇÃO ---
-
+    // #region 3. Configuração
     openConfigSidebar(node: any) {
         this.editingNode = node;
         const data = node.getData();
 
-        // Reseta estados
+        // Resets
         this.selectedProperty = null;
         this.availableOperators = [];
         this.selectedOperator = '';
         this.conditionValue = '';
         this.editingNodeLabel = '';
-
-        this.currentSchema = null;
         this.dynamicValues = {};
+        this.currentSchema = null;
 
-        // CASO 1: NÓ IF
         if (data.type === 'if') {
             if (data.conditionData) {
                 this.selectedProperty = this.properties.find(p => p.id === data.conditionData.propertyId) || null;
@@ -767,23 +167,50 @@ export class FlowEditorComponent implements AfterViewInit {
                     this.conditionValue = data.conditionData.value;
                 }
             }
-        }
-        // CASO 2: NÓS GENÉRICOS (Dinâmicos)
-        else {
-            // Carrega Label atual
+        } else {
             this.editingNodeLabel = node.attr('label/text') || data.label || '';
-
-            // Busca Schema compatível
             const schema = this.schemas.find(s => s.type === data.type);
-
             if (schema) {
                 this.currentSchema = schema;
                 this.prepareFormSections(schema);
                 this.dynamicValues = { ...(data.config || {}) };
+                setTimeout(() => this.loadSavedLabels(), 50);
             }
         }
+        this.showConfig = true;
+    }
 
-        this.showConfig = true; // Abre o menu
+    saveConfiguration() {
+        if (!this.editingNode) return;
+        const currentData = this.editingNode.getData();
+
+        if (currentData.type === 'if') {
+            if (this.selectedProperty && this.selectedOperator) {
+                const opLabel = this.availableOperators.find((op: any) => op.id === this.selectedOperator)?.label;
+                let displayText = `${this.selectedProperty.label}\n${opLabel}`;
+                if (this.selectedProperty.type !== 'boolean') displayText += ` ${this.conditionValue}`;
+
+                this.editingNode.setData({ ...currentData, conditionData: { propertyId: this.selectedProperty.id, operator: this.selectedOperator, value: this.conditionValue } });
+                this.editingNode.attr('label/text', displayText);
+            }
+        } else {
+            this.editingNode.attr('label/text', this.editingNodeLabel);
+            this.editingNode.setData({ ...currentData, label: this.editingNodeLabel, config: this.dynamicValues });
+        }
+        this.closeConfig();
+    }
+
+    closeConfig() {
+        this.showConfig = false;
+        this.editingNode = null;
+        setTimeout(() => { this.configMaximized = false; }, 300);
+        this.cdr.detectChanges();
+    }
+
+    private prepareFormSections(schema: Models.ToolSchema) {
+        this.uiConfigSections = [];
+        if (!schema) return;
+        this.uiConfigSections = schema.sections || (schema.fields ? [{ title: 'Geral', fields: schema.fields, expanded: true }] : []);
     }
 
     onPropertyChange() {
@@ -794,185 +221,190 @@ export class FlowEditorComponent implements AfterViewInit {
 
     updateOperators() {
         if (this.selectedProperty) {
-            this.availableOperators = this.operatorsByType[this.selectedProperty.type] || [];
+            // <--- Usando CONSTANTE importada
+            this.availableOperators = OPERATORS_BY_TYPE[this.selectedProperty.type] || [];
         }
     }
 
-    saveConfiguration() {
-        if (!this.editingNode) return;
-        const currentData = this.editingNode.getData();
+    toggleActions() { this.showActions = !this.showActions; }
+    toggleMaximize() { this.configMaximized = !this.configMaximized; }
+    // #endregion
 
-        // SALVAR IF
-        if (currentData.type === 'if') {
-            if (this.selectedProperty && this.selectedOperator) {
-                const opLabel = this.availableOperators.find((op: any) => op.id === this.selectedOperator)?.label;
-                let displayText = `${this.selectedProperty.label}\n${opLabel}`;
-                if (this.selectedProperty.type !== 'boolean') {
-                    displayText += ` ${this.conditionValue}`;
+    // #region 4. Relations (API)
+    loadRelationData(field: Models.ToolField, isScroll = false) {
+        if (!this.control?.searchRelation) return;
+        const key = field.property;
+        const state = this.relationState[key];
+        if (state.loading || (isScroll && !state.hasMore)) return;
+
+        state.loading = true;
+        this.control.searchRelation(field.class, state.search, state.page, field.filter || {})
+            .then((response: any) => {
+                state.options = state.page === 1 ? response.items : [...state.options, ...response.items];
+                state.hasMore = response.hasMore;
+                state.page++;
+                state.loading = false;
+            })
+            .catch(() => state.loading = false);
+    }
+
+    onRelationSearch(field: Models.ToolField, event: any) {
+        const key = field.property;
+        this.relationState[key].search = event.target.value;
+        this.relationState[key].page = 1;
+        this.relationState[key].hasMore = true;
+        if (this.relationState[key].timeout) clearTimeout(this.relationState[key].timeout);
+        this.relationState[key].timeout = setTimeout(() => this.loadRelationData(field), 500);
+    }
+
+    onRelationScroll(field: Models.ToolField, event: any) {
+        if (event.target.scrollHeight - event.target.scrollTop <= event.target.clientHeight + 20) {
+            this.loadRelationData(field, true);
+        }
+    }
+
+    selectRelationItem(field: Models.ToolField, item: any) {
+        const key = field.property;
+        this.dynamicValues[key] = item.id;
+        this.relationState[key].selectedLabel = item.label;
+        this.relationState[key].open = false;
+    }
+
+    toggleRelation(field: Models.ToolField) {
+        const key = field.property;
+        if (!this.relationState[key]) {
+            this.relationState[key] = { options: [], page: 1, loading: false, open: false, search: '', hasMore: true };
+            this.loadRelationData(field);
+        }
+        this.relationState[key].open = !this.relationState[key].open;
+    }
+
+    private loadSavedLabels() {
+        if (!this.dynamicValues || !this.uiConfigSections) return;
+        this.uiConfigSections.forEach(section => {
+            section.fields?.forEach((field: any) => {
+                if (field.type === 'relation' && this.dynamicValues[field.property]) {
+                    const key = field.property;
+                    if (!this.relationState[key]) this.relationState[key] = { options: [], open: false, selectedLabel: null };
+                    if (this.relationState[key].selectedLabel) return;
+
+                    this.relationState[key].selectedLabel = `Carregando...`;
+                    this.control?.getRelationLabel?.(field.class, this.dynamicValues[key])
+                        .then((res: any) => { this.relationState[key].selectedLabel = res.label; this.cdr.detectChanges(); });
                 }
+            });
+        });
+    }
+    // #endregion
 
-                this.editingNode.setData({
-                    ...currentData,
-                    conditionData: {
-                        propertyId: this.selectedProperty.id,
-                        operator: this.selectedOperator,
-                        value: this.conditionValue
+    // #region 5. IO e Validação
+    public getExportData() {
+        if (!this.validateProject()) return null; // Validação
+
+        const fullGraph = this.graph.toJSON();
+        const logicData = {
+            nodes: fullGraph.cells.filter((c: any) => c.shape !== 'edge').map((n: any) => ({
+                id: n.id, type: n.data?.type, label: n.data?.label,
+                config: n.data?.type === 'if' ? (n.data.conditionData || {}) : (n.data?.config || {})
+            })),
+            edges: fullGraph.cells.filter((c: any) => c.shape === 'edge').map((e: any) => ({
+                source: e.source.cell, target: e.target.cell, sourcePort: e.source.port
+            }))
+        };
+        return { logic: logicData, graph: fullGraph };
+    }
+
+    public importData(data: any) {
+        try {
+            const graphData = typeof data === 'string' ? JSON.parse(data) : data;
+            if (!graphData) return false;
+            this.graph.fromJSON(graphData);
+            this.graph.zoomToFit({ padding: 20, maxScale: 1 });
+            this.showSystemAlert('Sucesso', 'Projeto importado!', 'success');
+            return true;
+        } catch {
+            this.showSystemAlert('Erro', 'Arquivo inválido.', 'warning');
+            return false;
+        }
+    }
+
+    public clearCanvas() {
+        this.showSystemConfirm('Limpar', 'Deseja apagar tudo?', () => this.graph.clearCells());
+    }
+
+    validateProject(): boolean {
+        const nodes = this.graph.getNodes();
+        for (const node of nodes) {
+            const data = node.getData();
+            if (data.type === 'start') continue;
+
+            if (data.type === 'if') {
+                const c = data.conditionData;
+                if (!c || !c.propertyId || !c.operator) {
+                    this.handleValidationError(node, 'Configure a regra do IF.');
+                    return false;
+                }
+            } else {
+                const schema = this.schemas.find(s => s.type === data.type);
+                if (schema) {
+                    let allFields: any[] = [];
+                    if (schema.sections) schema.sections.forEach(s => allFields.push(...s.fields));
+                    else if (schema.fields) allFields = schema.fields;
+
+                    const config = data.config || {};
+                    for (const field of allFields) {
+                        if (field.required) {
+                            const val = config[field.property];
+                            if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) {
+                                this.handleValidationError(node, `Campo "${field.label}" obrigatório.`);
+                                return false;
+                            }
+                        }
                     }
-                });
-                this.editingNode.attr('label/text', displayText);
+                }
             }
         }
-        // SALVAR GENÉRICO
-        else {
-            // Atualiza visual
-            this.editingNode.attr('label/text', this.editingNodeLabel);
-
-            // Atualiza dados
-            this.editingNode.setData({
-                ...currentData,
-                label: this.editingNodeLabel,
-                config: this.dynamicValues // Salva o form dinâmico
-            });
-        }
-
-        this.closeConfig();
+        return true;
     }
 
-    public closeConfig() {
-        // 1. Inicia a animação de fechar (slide out)
-        this.showConfig = false;
-
-        // 2. Limpa a variável do nó que estava sendo editado
-        this.editingNode = null;
-
-        // 3. Aguarda a animação terminar (300ms) para resetar o tamanho
-        // Isso evita que a janela "encolha" visualmente antes de sumir
-        setTimeout(() => {
-            this.configMaximized = false;
-        }, 300);
-
-        // 4. Força a detecção de mudanças do Angular
-        this.cdr.detectChanges();
+    handleValidationError(node: any, message: string) {
+        this.selectCell(node);
+        this.graph.centerCell(node);
+        this.showSystemAlert('Atenção', message, 'warning');
     }
 
-    // --- PERSISTÊNCIA E EXPORTAÇÃO ---
-
+    // --- Usando Utils para arquivos ---
     saveProjectFile() {
-        const data = this.graph.toJSON();
-        const jsonString = JSON.stringify(data, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `fluxo-${new Date().getTime()}.json`;
-        a.click();
-        window.URL.revokeObjectURL(url);
+        FlowUtils.downloadJson(this.graph.toJSON());
     }
 
-    triggerFileInput() {
-        const fileInput = document.getElementById('fileInput') as HTMLInputElement;
-        if (fileInput) fileInput.click();
-    }
+    triggerFileInput() { document.getElementById('fileInput')?.click(); }
 
     onFileSelected(event: any) {
         const file = event.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e: any) => {
-            try {
-                const jsonData = JSON.parse(e.target.result);
-                this.graph.clearCells();
-                this.graph.fromJSON(jsonData);
-                this.graph.centerContent();
-
-                // NOVO ALERTA
-                this.showSystemAlert('Sucesso', 'Projeto carregado com sucesso!');
-
-            } catch (error) {
-                // NOVO ALERTA DE ERRO
-                this.showSystemAlert('Erro', 'Erro ao carregar arquivo. Verifique se é um JSON válido.');
-            }
-        };
-        reader.readAsText(file);
+        FlowUtils.readJsonFile(file)
+            .then(json => this.importData(json))
+            .catch(() => this.showSystemAlert('Erro', 'Erro ao ler arquivo.', 'warning'));
         event.target.value = '';
     }
+    // #endregion
 
-    clearCanvas() {
-        this.showSystemConfirm(
-            'Limpar Fluxo',
-            'Tem certeza que deseja apagar todo o fluxo? Esta ação não pode ser desfeita.',
-            () => {
-                // Esta função anônima só roda se clicar em "Sim"
-                this.graph.clearCells();
-            }
-        );
-    }
-
-    exportGraph() {
-        const nodes: WorkflowNode[] = [];
-        const allCells = this.graph.getNodes();
-        const allEdges = this.graph.getEdges();
-
-        allCells.forEach(cell => {
-            const data = cell.getData();
-            const nodeId = cell.id;
-
-            const nodeJson: WorkflowNode = {
-                id: nodeId,
-                type: data.type,
-                // Se IF -> conditionData; Se Genérico -> config (do form dinâmico)
-                config: data.type === 'if' ? (data.conditionData || {}) : (data.config || {})
-            };
-
-            const outgoingEdges = allEdges.filter(edge => edge.getSourceCellId() === nodeId);
-
-            if (data.type === 'if') {
-                const trueEdge = outgoingEdges.find(edge => edge.getSourcePortId() === 'trueOut');
-                const falseEdge = outgoingEdges.find(edge => edge.getSourcePortId() === 'falseOut');
-                if (trueEdge) nodeJson.nextTrue = trueEdge.getTargetCellId();
-                if (falseEdge) nodeJson.nextFalse = falseEdge.getTargetCellId();
-            } else {
-                const edge = outgoingEdges.find(edge => edge.getSourcePortId() === 'out');
-                if (edge) nodeJson.next = edge.getTargetCellId();
-            }
-            nodes.push(nodeJson);
-        });
-
-        const targetIds = new Set(allEdges.map(e => e.getTargetCellId()));
-        const startNode = nodes.find(n => !targetIds.has(n.id));
-
-        const finalPayload: WorkflowDefinition = {
-            startNodeId: startNode ? startNode.id : null,
-            nodes: nodes
-        };
-
-        console.log('JSON EXPORTADO (Lógica Pura):', finalPayload);
-        this.saveGraph.emit(finalPayload);
-        alert('JSON Gerado no Console (F12)!');
-    }
-
-    // --- UTILITÁRIOS DE SELEÇÃO ---
+    // #region 6. Utilitários UI
     selectCell(cell: Cell) {
         this.resetSelection();
         this.selectedCell = cell;
-        if (cell.isNode()) {
-            cell.attr('body/stroke', '#ff9c6e');
-            cell.attr('body/strokeWidth', 3);
-        } else if (cell.isEdge()) {
-            cell.attr('line/stroke', '#ff9c6e');
-            cell.attr('line/strokeWidth', 3);
-        }
+        const style = { stroke: '#ff9c6e', strokeWidth: 3 };
+        cell.isNode() ? cell.attr('body', style) : cell.attr('line', style);
     }
 
     resetSelection() {
         if (this.selectedCell) {
             if (this.selectedCell.isNode()) {
                 const isIf = this.selectedCell.getData()?.type === 'if';
-                this.selectedCell.attr('body/stroke', isIf ? '#faad14' : '#ccc');
-                this.selectedCell.attr('body/strokeWidth', 2);
+                this.selectedCell.attr('body', { stroke: isIf ? '#faad14' : '#ccc', strokeWidth: 2 });
             } else if (this.selectedCell.isEdge()) {
-                this.selectedCell.attr('line/stroke', '#5F95FF');
-                this.selectedCell.attr('line/strokeWidth', 2);
+                this.selectedCell.attr('line', { stroke: '#5F95FF', strokeWidth: 2 });
             }
         }
         this.selectedCell = null;
@@ -980,12 +412,26 @@ export class FlowEditorComponent implements AfterViewInit {
 
     @HostListener('window:keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
-        // Só deleta se não estiver editando (showConfig false)
-        if (!this.showConfig && (event.key === 'Delete' || event.key === 'Backspace')) {
-            if (this.selectedCell) {
-                this.graph.removeCell(this.selectedCell);
-                this.selectedCell = null;
-            }
+        if (!this.showConfig && (event.key === 'Delete' || event.key === 'Backspace') && this.selectedCell) {
+            this.graph.removeCell(this.selectedCell);
+            this.selectedCell = null;
         }
     }
+
+    private showSystemAlert(title: string, message: string, type: string = 'info') {
+        this.modalState = { visible: true, type, title, message, confirmLabel: 'Entendi', pendingAction: null };
+        this.cdr.detectChanges();
+    }
+
+    private showSystemConfirm(title: string, message: string, onConfirm: () => void) {
+        this.modalState = { visible: true, type: 'confirm', title, message, confirmLabel: 'Sim', pendingAction: onConfirm };
+    }
+
+    confirmModalAction() { this.modalState.pendingAction?.(); this.closeModal(); }
+
+    closeModal() {
+        this.modalState.visible = false; this.modalState.pendingAction = null;
+        this.cdr.detectChanges();
+    }
+    // #endregion
 }
