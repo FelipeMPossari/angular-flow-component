@@ -9,7 +9,6 @@ import { Graph, Cell } from '@antv/x6';
 import * as Models from './flow.models';
 import { getGraphOptions, LABEL_STYLE, PORT_GROUPS, validateConnectionRule } from './flow-graph.config';
 import { FlowUtils } from './flow.utils';
-import { OPERATORS_BY_TYPE } from './flow.constants';
 
 @Component({
     selector: 'app-flow-editor',
@@ -23,9 +22,8 @@ export class FlowEditorComponent implements AfterViewInit {
 
     // --- INPUTS ---
     @Input() tools: Models.FlowTool[] = [];
-    @Input() properties: Models.PropertyOption[] = [];
-    // @Input() schemas -> REMOVIDO
-    @Input() control: any; // Ponte com o Legado (Agora essencial para abrir a modal)
+    // @Input() properties REMOVIDO: O legado que gerencia as propriedades do IF agora
+    @Input() control: any; // A Ponte é a única coisa que importa agora
 
     @Output() saveGraph = new EventEmitter<Models.WorkflowDefinition>();
 
@@ -33,40 +31,23 @@ export class FlowEditorComponent implements AfterViewInit {
     private graph!: Graph;
     selectedCell: Cell | null = null;
 
-    // UI
+    // UI (Só sobrou a sidebar de ferramentas e o modal de alerta)
     showActions = true;
-    showConfig = false;     // Controla a sidebar do IF
-    configMaximized = false;
     modalState: Models.ModalState = { visible: false, type: 'alert', title: '', message: '', confirmLabel: 'OK', pendingAction: null };
-
-    // Edição (IF)
-    editingNode: any = null;
-    selectedProperty: Models.PropertyOption | null = null;
-    selectedOperator: string = '';
-    conditionValue: any = '';
-    availableOperators: any[] = [];
 
     constructor(private ngZone: NgZone, private cdr: ChangeDetectorRef) { }
 
-    // #region 1. Lifecycle e Inicialização
+    // #region 1. Lifecycle
     ngAfterViewInit() {
         this.initGraph();
     }
 
     ngOnChanges(changes: SimpleChanges): void {
-        // Conecta os métodos que o Legado pode chamar
         if (changes['control'] && this.control) {
             this.control.getExportData = this.getExportData.bind(this);
             this.control.importData = this.importData.bind(this);
             this.control.clearCanvas = this.clearCanvas.bind(this);
-            this.control.updateNodeData = this.apiUpdateNodeData.bind(this); // NOVO: Para o legado atualizar o nó após a modal
-        }
-
-        if (changes['properties'] && this.properties) {
-            this.properties = this.properties.map(prop => ({
-                ...prop,
-                type: FlowUtils.normalizeType(prop.type)
-            }));
+            this.control.updateNodeData = this.apiUpdateNodeData.bind(this);
         }
     }
 
@@ -82,18 +63,10 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
 
-        // --- LÓGICA DO DUPLO CLIQUE (A GRANDE MUDANÇA) ---
+        // --- DUPLO CLIQUE: AGORA É SEMPRE RESPONSABILIDADE DO LEGADO ---
         this.graph.on('node:dblclick', ({ node }) => {
             this.ngZone.run(() => {
-                const type = node.getData()?.type;
-
-                if (type === 'if') {
-                    // Se for IF, abre a sidebar interna do Angular (como antes)
-                    this.openIfConfig(node);
-                } else {
-                    // Se for Ação, chama o Legado para abrir a Modal dele
-                    this.fireLegacyModal(node);
-                }
+                this.fireLegacyModal(node);
             });
         });
 
@@ -104,7 +77,7 @@ export class FlowEditorComponent implements AfterViewInit {
     }
     // #endregion
 
-    // #region 2. Manipulação de Nós (Add/Drag)
+    // #region 2. Manipulação de Nós
     addNode(type: string, toolLabel?: string, position?: { x: number, y: number }) {
         const x = position ? position.x : 100 + Math.random() * 200;
         const y = position ? position.y : 100 + Math.random() * 200;
@@ -116,7 +89,8 @@ export class FlowEditorComponent implements AfterViewInit {
         if (type === 'if') {
             this.graph.addNode({
                 x: finalX, y: finalY, width: 160, height: 70,
-                data: { type: 'if' },
+                // Padronizamos: tudo fica dentro de 'config', inclusive a condição
+                data: { type: 'if', config: {} },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: { body: { fill: '#fffbe6', stroke: '#faad14', strokeWidth: 2, rx: 6, ry: 6 }, ...commonAttrs },
                 ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'trueOut', id: 'trueOut' }, { group: 'falseOut', id: 'falseOut' }] },
@@ -124,7 +98,6 @@ export class FlowEditorComponent implements AfterViewInit {
         } else {
             this.graph.addNode({
                 x: finalX, y: finalY, width: 160, height: 70,
-                // Iniciamos a config vazia. O legado vai preencher via 'updateNodeData' se quiser.
                 data: { type: type, label: toolLabel || type, config: {} },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: { body: { fill: '#ffffff', stroke: '#ccc', strokeWidth: 2, strokeDasharray: '5,5', rx: 6, ry: 6 }, ...commonAttrs },
@@ -151,114 +124,55 @@ export class FlowEditorComponent implements AfterViewInit {
     }
     // #endregion
 
-    // #region 3. Configuração (Apenas IF) e Ponte Legada
+    // #region 3. A Ponte Legada
 
-    // Abre a sidebar APENAS para o IF
-    openIfConfig(node: any) {
-        this.editingNode = node;
-        const data = node.getData();
-
-        // Reseta estados
-        this.selectedProperty = null;
-        this.availableOperators = [];
-        this.selectedOperator = '';
-        this.conditionValue = '';
-
-        if (data.conditionData) {
-            this.selectedProperty = this.properties.find(p => p.id === data.conditionData.propertyId) || null;
-            if (this.selectedProperty) {
-                this.updateOperators();
-                this.selectedOperator = data.conditionData.operator;
-                this.conditionValue = data.conditionData.value;
-            }
-        }
-
-        this.showConfig = true;
-        this.cdr.detectChanges();
-    }
-
-    // Chama o Legado
+    // Método único para disparar edição
     fireLegacyModal(node: any) {
         if (this.control && this.control.onEditNode) {
             const data = node.getData();
-            console.log("📡 Chamando Legado para editar nó:", node.id);
-            // Passamos ID, Tipo e a Configuração Atual (que pode estar vazia ou cheia)
+            console.log("📡 Chamando Legado para editar nó:", node.id, data.type);
+
+            // Enviamos ID, TIPO e a mochila CONFIG
+            // Se for IF, o 'config' conterá { property: '...', operator: '...', value: '...' }
             this.control.onEditNode(node.id, data.type, data.config || {});
         } else {
             console.warn("⚠️ Método 'onEditNode' não definido no control!");
-            this.showSystemAlert("Aviso", "Edição indisponível (Ponte desconectada).");
         }
     }
 
-    // Salva a sidebar do IF
-    saveConfiguration() {
-        if (!this.editingNode) return;
-        const currentData = this.editingNode.getData();
-
-        // Só temos lógica de salvar para IF agora
-        if (currentData.type === 'if') {
-            if (this.selectedProperty && this.selectedOperator) {
-                const opLabel = this.availableOperators.find((op: any) => op.id === this.selectedOperator)?.label;
-                let displayText = `${this.selectedProperty.label}\n${opLabel}`;
-                if (this.selectedProperty.type !== 'boolean') displayText += ` ${this.conditionValue}`;
-
-                this.editingNode.setData({
-                    ...currentData,
-                    conditionData: { propertyId: this.selectedProperty.id, operator: this.selectedOperator, value: this.conditionValue }
-                });
-                this.editingNode.attr('label/text', displayText);
-            }
-        }
-        this.closeConfig();
-    }
-
-    closeConfig() {
-        this.showConfig = false;
-        this.editingNode = null;
-        this.cdr.detectChanges();
-    }
-
-    // Método chamado PELO LEGADO quando a modal fecha e salva
+    // O Legado chama isso para devolver os dados
     public apiUpdateNodeData(nodeId: string, newConfig: any, newLabel?: string) {
         const cell = this.graph.getCellById(nodeId);
         if (cell && cell.isNode()) {
             const currentData = cell.getData();
 
-            // Atualiza os dados internos
+            // Se for IF, atualizamos o label visualmente para ficar fácil de ler no gráfico
+            let displayLabel = newLabel || currentData.label;
+
+            // Opcional: Se o legado mandar um label específico já formatado, usamos ele.
+            // Se não, mantemos o anterior.
+
             cell.setData({
                 ...currentData,
-                config: newConfig,
-                label: newLabel || currentData.label
+                config: newConfig, // Atualiza a mochila
+                label: displayLabel
             });
 
-            // Atualiza visualmente o texto se mudou
-            if (newLabel) {
-                cell.attr('label/text', newLabel);
+            if (displayLabel) {
+                cell.attr('label/text', displayLabel);
             }
 
-            console.log(`✅ Nó ${nodeId} atualizado pelo Legado.`);
-        }
-    }
-
-    onPropertyChange() {
-        this.selectedOperator = '';
-        this.conditionValue = '';
-        this.updateOperators();
-    }
-
-    updateOperators() {
-        if (this.selectedProperty) {
-            this.availableOperators = OPERATORS_BY_TYPE[this.selectedProperty.type] || [];
+            console.log(`✅ Nó ${nodeId} atualizado com sucesso.`);
         }
     }
 
     toggleActions() { this.showActions = !this.showActions; }
-    toggleMaximize() { this.configMaximized = !this.configMaximized; }
     // #endregion
 
-    // #region 4. Validação e Exportação
+    // #region 4. IO e Validação
     public getExportData() {
-        if (!this.validateProject()) return null;
+        // Validação Simplificada: O Angular apenas verifica se tem arestas soltas
+        // A validação de "Campo Obrigatório" agora é responsabilidade da Modal do Legado antes de salvar.
 
         const fullGraph = this.graph.toJSON();
         const logicData = {
@@ -266,8 +180,7 @@ export class FlowEditorComponent implements AfterViewInit {
                 id: n.id,
                 type: n.data?.type,
                 label: n.data?.label,
-                // Para IF: manda conditionData. Para Ação: manda o config (que veio do legado)
-                config: n.data?.type === 'if' ? (n.data.conditionData || {}) : (n.data?.config || {})
+                config: n.data?.config || {} // Tudo está aqui dentro agora
             })),
             edges: fullGraph.cells.filter((c: any) => c.shape === 'edge').map((e: any) => ({
                 source: e.source.cell, target: e.target.cell, sourcePort: e.source.port
@@ -294,32 +207,7 @@ export class FlowEditorComponent implements AfterViewInit {
         this.showSystemConfirm('Limpar', 'Deseja apagar tudo?', () => this.graph.clearCells());
     }
 
-    validateProject(): boolean {
-        const nodes = this.graph.getNodes();
-        for (const node of nodes) {
-            const data = node.getData();
-            if (data.type === 'start') continue;
-
-            // Validação APENAS para o IF (que é nossa responsabilidade)
-            if (data.type === 'if') {
-                const c = data.conditionData;
-                if (!c || !c.propertyId || !c.operator) {
-                    this.handleValidationError(node, 'Configure a regra do IF.');
-                    return false;
-                }
-            }
-            // Ações comuns: Assumimos que o legado validou na modal dele ou permitimos salvar incompleto
-        }
-        return true;
-    }
-
-    handleValidationError(node: any, message: string) {
-        this.selectCell(node);
-        this.graph.centerCell(node);
-        this.showSystemAlert('Atenção', message, 'warning');
-    }
-
-    // Arquivos locais
+    // Arquivos
     saveProjectFile() { FlowUtils.downloadJson(this.graph.toJSON()); }
     triggerFileInput() { document.getElementById('fileInput')?.click(); }
     onFileSelected(event: any) {
@@ -352,7 +240,7 @@ export class FlowEditorComponent implements AfterViewInit {
 
     @HostListener('window:keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
-        if (!this.showConfig && (event.key === 'Delete' || event.key === 'Backspace') && this.selectedCell) {
+        if ((event.key === 'Delete' || event.key === 'Backspace') && this.selectedCell) {
             this.graph.removeCell(this.selectedCell);
             this.selectedCell = null;
         }

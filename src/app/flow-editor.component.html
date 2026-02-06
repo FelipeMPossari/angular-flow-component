@@ -46,58 +46,6 @@
     <div #container class="graph-container" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
     </div>
 
-    <div class="config-overlay" [class.active]="showConfig" (click)="closeConfig()"></div>
-
-    <div class="config-sidebar" [class.active]="showConfig" [class.maximized]="configMaximized">
-
-        <div class="config-header">
-            <h3>Configuração</h3>
-            <div class="header-actions">
-                <button class="icon-btn close-variant" (click)="closeConfig()" title="Fechar">×</button>
-            </div>
-        </div>
-
-        <div class="config-body">
-
-            <div *ngIf="editingNode?.getData()?.type === 'if'">
-                <h4 style="margin-top:0; color:#faad14">Regra Condicional</h4>
-
-                <div class="form-group">
-                    <label>Propriedade:</label>
-                    <select [(ngModel)]="selectedProperty" (change)="onPropertyChange()">
-                        <option [ngValue]="null" disabled>Selecione...</option>
-                        <option *ngFor="let prop of properties" [ngValue]="prop">
-                            {{ prop.label }}
-                        </option>
-                    </select>
-                </div>
-
-                <div class="form-group" *ngIf="selectedProperty">
-                    <label>Comparação:</label>
-                    <select [(ngModel)]="selectedOperator">
-                        <option value="" disabled>Selecione...</option>
-                        <option *ngFor="let op of availableOperators" [value]="op.id">
-                            {{ op.label }}
-                        </option>
-                    </select>
-                </div>
-
-                <div class="form-group" *ngIf="selectedOperator && selectedProperty?.type !== 'boolean'">
-                    <label>Valor:</label>
-                    <input *ngIf="selectedProperty?.type === 'number'" type="number" [(ngModel)]="conditionValue">
-                    <input *ngIf="selectedProperty?.type === 'string'" type="text" [(ngModel)]="conditionValue">
-                    <input *ngIf="selectedProperty?.type === 'date'" type="date" [(ngModel)]="conditionValue">
-                </div>
-            </div>
-
-        </div>
-
-        <div class="config-footer">
-            <button class="cancel-btn" (click)="closeConfig()">Cancelar</button>
-            <button class="save-btn" (click)="saveConfiguration()">Salvar Alterações</button>
-        </div>
-    </div>
-
     <div class="modal-overlay" *ngIf="modalState.visible">
         <div class="modal-box">
             <div class="modal-header" [class.warning]="modalState.type === 'confirm' || modalState.type === 'warning'">
