@@ -1,49 +1,26 @@
 // flow.models.ts
 
-// --- DADOS BÁSICOS ---
+// --- DADOS BÁSICOS (Barra lateral esquerda) ---
 export interface FlowTool {
     id: string;
     label: string;
     icon?: string;
 }
 
+// --- IF / CONDIÇÕES ---
 export interface PropertyOption {
     id: string;
     label: string;
     type: string;
-    originalType?: string; // Opcional para exibição visual
-}
-
-// --- FORMULÁRIO DINÂMICO ---
-export interface ToolField {
-    property: string; // Identificador principal
-    name?: string;    // Legado
-    label: string;
-    type: 'text' | 'number' | 'select' | 'boolean' | 'textarea' | 'date' | 'relation';
-    placeholder?: string;
-    required?: boolean;
-    options?: { label: string; value: any }[]; // Para selects
-    class?: string;   // Para relation
-    filter?: any;     // Para relation
-}
-
-export interface ToolSection {
-    title: string;
-    fields: ToolField[];
-    expanded?: boolean;
-}
-
-export interface ToolSchema {
-    type: string;
-    fields?: ToolField[];    // Legado
-    sections?: ToolSection[]; // Novo formato
+    originalType?: string;
 }
 
 // --- EXPORTAÇÃO E FLUXO ---
 export interface WorkflowNode {
     id: string;
     type: string;
-    config?: any;
+    label?: string;     // Adicionei label explícito aqui
+    config?: any;       // Um objeto genérico, já que o legado vai gerenciar o conteúdo
     next?: string;
     nextTrue?: string;
     nextFalse?: string;
@@ -54,7 +31,7 @@ export interface WorkflowDefinition {
     nodes: WorkflowNode[];
 }
 
-// --- INTERFACE DO MODAL ---
+// --- INTERFACE DO MODAL DO SISTEMA (Alertas internos) ---
 export interface ModalState {
     visible: boolean;
     type: string; // 'alert', 'confirm', 'warning', 'info'

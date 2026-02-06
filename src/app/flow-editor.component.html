@@ -1,12 +1,9 @@
 <div class="app-container">
 
     <div class="sidebar">
-
         <div class="section-header" (click)="toggleActions()">
             <h3>Ações</h3>
-            <button class="toggle-btn">
-                {{ showActions ? '▼' : '▶' }}
-            </button>
+            <button class="toggle-btn">{{ showActions ? '▼' : '▶' }}</button>
         </div>
 
         <div class="actions-container" *ngIf="showActions">
@@ -55,170 +52,44 @@
 
         <div class="config-header">
             <h3>Configuração</h3>
-
             <div class="header-actions">
-
-                <button class="icon-btn maximize-variant" (click)="toggleMaximize()"
-                    [title]="configMaximized ? 'Restaurar' : 'Maximizar'">
-                    <span *ngIf="!configMaximized">⤢</span>
-                    <span *ngIf="configMaximized">⤡</span>
-                </button>
-
                 <button class="icon-btn close-variant" (click)="closeConfig()" title="Fechar">×</button>
             </div>
         </div>
 
         <div class="config-body">
-            <ng-container [ngSwitch]="editingNode?.getData()?.type">
 
-                <div *ngSwitchCase="'if'">
-                    <h4 style="margin-top:0; color:#faad14">Regra Condicional</h4>
+            <div *ngIf="editingNode?.getData()?.type === 'if'">
+                <h4 style="margin-top:0; color:#faad14">Regra Condicional</h4>
 
-                    <div class="form-group">
-                        <label>Propriedade:</label>
-                        <select [(ngModel)]="selectedProperty" (change)="onPropertyChange()">
-                            <option [ngValue]="null" disabled>Selecione...</option>
-                            <option *ngFor="let prop of properties" [ngValue]="prop">
-                                {{ prop.label }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" *ngIf="selectedProperty">
-                        <label>Comparação:</label>
-                        <select [(ngModel)]="selectedOperator">
-                            <option value="" disabled>Selecione...</option>
-                            <option *ngFor="let op of availableOperators" [value]="op.id">
-                                {{ op.label }}
-                            </option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" *ngIf="selectedOperator && selectedProperty?.type !== 'boolean'">
-                        <label>Valor:</label>
-                        <input *ngIf="selectedProperty?.type === 'number'" type="number" [(ngModel)]="conditionValue">
-                        <input *ngIf="selectedProperty?.type === 'string'" type="text" [(ngModel)]="conditionValue">
-                        <input *ngIf="selectedProperty?.type === 'date'" type="date" [(ngModel)]="conditionValue">
-                    </div>
+                <div class="form-group">
+                    <label>Propriedade:</label>
+                    <select [(ngModel)]="selectedProperty" (change)="onPropertyChange()">
+                        <option [ngValue]="null" disabled>Selecione...</option>
+                        <option *ngFor="let prop of properties" [ngValue]="prop">
+                            {{ prop.label }}
+                        </option>
+                    </select>
                 </div>
 
-                <div *ngSwitchDefault>
-
-                    <h4 style="margin-top:0; color:#1890ff">
-                        {{ editingNode?.getData()?.type | titlecase }}
-                    </h4>
-
-                    <div class="form-group">
-                        <label>Nome do Passo (Visual):</label>
-                        <input type="text" [(ngModel)]="editingNodeLabel" placeholder="Ex: Enviar Email">
-                    </div>
-
-                    <div *ngIf="currentSchema; else noSchemaTpl">
-                        <hr style="border:0; border-top:1px dashed #eee; margin:15px 0;">
-
-                        <div *ngIf="uiConfigSections.length > 0; else noSchemaTpl">
-
-                            <div *ngFor="let section of uiConfigSections; let i = index" class="accordion-section">
-
-                                <details [open]="i === 0 || section.expanded">
-                                    <summary class="accordion-header">
-                                        {{ section.title }}
-                                        <span class="icon">▼</span>
-                                    </summary>
-
-                                    <div class="accordion-content">
-                                        <div class="form-group" *ngFor="let field of section.fields">
-
-                                            <label>
-                                                {{ field.label }}
-                                                <span *ngIf="field.required" style="color:red">*</span>
-                                            </label>
-
-                                            <input *ngIf="field.type === 'text'" type="text"
-                                                [(ngModel)]="dynamicValues[field.property]"
-                                                [placeholder]="field.placeholder || ''">
-
-                                            <input *ngIf="field.type === 'number'" type="number"
-                                                [(ngModel)]="dynamicValues[field.property]"
-                                                [placeholder]="field.placeholder || ''">
-
-                                            <input *ngIf="field.type === 'date'" type="date"
-                                                [(ngModel)]="dynamicValues[field.property]">
-
-                                            <div *ngIf="field.type === 'boolean'"
-                                                style="display:flex; align-items:center; gap:10px;">
-                                                <input type="checkbox" [(ngModel)]="dynamicValues[field.property]"
-                                                    style="width:auto; margin:0;">
-                                                <span style="color:#666; font-size:13px;">{{ field.placeholder ||
-                                                    'Ativar?' }}</span>
-                                            </div>
-
-                                            <textarea *ngIf="field.type === 'textarea'"
-                                                [(ngModel)]="dynamicValues[field.property]" rows="4"
-                                                [placeholder]="field.placeholder || ''"></textarea>
-
-                                            <div *ngIf="field.type === 'relation'" class="relation-wrapper">
-                                                <div class="relation-input" (click)="toggleRelation(field)">
-                                                    <span>
-                                                        {{ relationState[field.property]?.selectedLabel
-                                                        || dynamicValues[field.property]
-                                                        || field.placeholder
-                                                        || 'Selecione...' }}
-                                                    </span>
-                                                    <span class="arrow" style="font-size: 10px; color: #999;">▼</span>
-                                                </div>
-
-                                                <div class="relation-dropdown"
-                                                    *ngIf="relationState[field.property]?.open">
-                                                    <input type="text" class="relation-search" placeholder="Buscar..."
-                                                        autofocus (input)="onRelationSearch(field, $event)"
-                                                        (click)="$event.stopPropagation()">
-
-                                                    <ul class="relation-list"
-                                                        (scroll)="onRelationScroll(field, $event)">
-                                                        <li *ngFor="let opt of relationState[field.property]?.options"
-                                                            (click)="selectRelationItem(field, opt)">
-                                                            {{ opt.label }}
-                                                        </li>
-                                                        <li *ngIf="relationState[field.property]?.loading"
-                                                            class="loading-item">
-                                                            Carregando... ⏳
-                                                        </li>
-                                                        <li *ngIf="!relationState[field.property]?.loading && relationState[field.property]?.options?.length === 0"
-                                                            class="empty-item">
-                                                            Nenhum resultado.
-                                                        </li>
-                                                    </ul>
-                                                </div>
-                                            </div>
-
-                                            <select *ngIf="field.type === 'select'"
-                                                [(ngModel)]="dynamicValues[field.property]">
-                                                <option [ngValue]="undefined" disabled>Selecione...</option>
-                                                <option *ngFor="let opt of field.options" [ngValue]="opt.value">{{
-                                                    opt.label }}</option>
-                                            </select>
-
-                                        </div>
-                                    </div>
-                                </details>
-                            </div>
-
-                        </div>
-
-                        <ng-template #noSchemaTpl>
-                        </ng-template>
-                    </div>
-
-                    <ng-template #noSchemaTpl>
-                        <div
-                            style="background:#f9f9f9; padding:15px; border-radius:6px; color:#999; text-align:center; font-style:italic;">
-                            Nenhuma configuração extra.
-                        </div>
-                    </ng-template>
+                <div class="form-group" *ngIf="selectedProperty">
+                    <label>Comparação:</label>
+                    <select [(ngModel)]="selectedOperator">
+                        <option value="" disabled>Selecione...</option>
+                        <option *ngFor="let op of availableOperators" [value]="op.id">
+                            {{ op.label }}
+                        </option>
+                    </select>
                 </div>
 
-            </ng-container>
+                <div class="form-group" *ngIf="selectedOperator && selectedProperty?.type !== 'boolean'">
+                    <label>Valor:</label>
+                    <input *ngIf="selectedProperty?.type === 'number'" type="number" [(ngModel)]="conditionValue">
+                    <input *ngIf="selectedProperty?.type === 'string'" type="text" [(ngModel)]="conditionValue">
+                    <input *ngIf="selectedProperty?.type === 'date'" type="date" [(ngModel)]="conditionValue">
+                </div>
+            </div>
+
         </div>
 
         <div class="config-footer">
@@ -226,27 +97,22 @@
             <button class="save-btn" (click)="saveConfiguration()">Salvar Alterações</button>
         </div>
     </div>
+
     <div class="modal-overlay" *ngIf="modalState.visible">
         <div class="modal-box">
-
             <div class="modal-header" [class.warning]="modalState.type === 'confirm' || modalState.type === 'warning'">
-
                 <span class="modal-icon">
                     {{ (modalState.type === 'confirm' || modalState.type === 'warning') ? '⚠️' : 'ℹ️' }}
                 </span>
-
                 <h3>{{ modalState.title }}</h3>
             </div>
-
             <div class="modal-body">
                 <p>{{ modalState.message }}</p>
             </div>
-
             <div class="modal-footer">
                 <button *ngIf="modalState.type === 'confirm'" class="modal-btn cancel" (click)="closeModal()">
                     Cancelar
                 </button>
-
                 <button class="modal-btn confirm" [class.danger]="modalState.type === 'confirm'"
                     (click)="confirmModalAction()">
                     {{ modalState.confirmLabel || 'OK' }}

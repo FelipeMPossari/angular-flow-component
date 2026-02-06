@@ -6,11 +6,10 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Graph, Cell } from '@antv/x6';
 
-// Imports dos nossos arquivos auxiliares
 import * as Models from './flow.models';
 import { getGraphOptions, LABEL_STYLE, PORT_GROUPS, validateConnectionRule } from './flow-graph.config';
-import { FlowUtils } from './flow.utils';         // <--- NOVO
-import { OPERATORS_BY_TYPE } from './flow.constants'; // <--- NOVO
+import { FlowUtils } from './flow.utils';
+import { OPERATORS_BY_TYPE } from './flow.constants';
 
 @Component({
     selector: 'app-flow-editor',
@@ -22,11 +21,12 @@ import { OPERATORS_BY_TYPE } from './flow.constants'; // <--- NOVO
 export class FlowEditorComponent implements AfterViewInit {
     @ViewChild('container', { static: true }) container!: ElementRef;
 
-    // --- INPUTS & OUTPUTS ---
+    // --- INPUTS ---
     @Input() tools: Models.FlowTool[] = [];
     @Input() properties: Models.PropertyOption[] = [];
-    @Input() schemas: Models.ToolSchema[] = [];
-    @Input() control: any;
+    // @Input() schemas -> REMOVIDO
+    @Input() control: any; // Ponte com o Legado (Agora essencial para abrir a modal)
+
     @Output() saveGraph = new EventEmitter<Models.WorkflowDefinition>();
 
     // --- ESTADO ---
@@ -35,43 +35,37 @@ export class FlowEditorComponent implements AfterViewInit {
 
     // UI
     showActions = true;
-    showConfig = false;
+    showConfig = false;     // Controla a sidebar do IF
     configMaximized = false;
-    uiConfigSections: Models.ToolSection[] = [];
-
     modalState: Models.ModalState = { visible: false, type: 'alert', title: '', message: '', confirmLabel: 'OK', pendingAction: null };
 
-    // Edição
+    // Edição (IF)
     editingNode: any = null;
-    editingNodeLabel: string = '';
-    dynamicValues: any = {};
-    currentSchema: Models.ToolSchema | null = null;
-
-    // IF e Relations
     selectedProperty: Models.PropertyOption | null = null;
     selectedOperator: string = '';
     conditionValue: any = '';
     availableOperators: any[] = [];
-    relationState: any = {};
 
     constructor(private ngZone: NgZone, private cdr: ChangeDetectorRef) { }
 
-    // #region 1. Lifecycle
+    // #region 1. Lifecycle e Inicialização
     ngAfterViewInit() {
         this.initGraph();
     }
 
     ngOnChanges(changes: SimpleChanges): void {
+        // Conecta os métodos que o Legado pode chamar
         if (changes['control'] && this.control) {
             this.control.getExportData = this.getExportData.bind(this);
             this.control.importData = this.importData.bind(this);
             this.control.clearCanvas = this.clearCanvas.bind(this);
+            this.control.updateNodeData = this.apiUpdateNodeData.bind(this); // NOVO: Para o legado atualizar o nó após a modal
         }
 
         if (changes['properties'] && this.properties) {
             this.properties = this.properties.map(prop => ({
                 ...prop,
-                type: FlowUtils.normalizeType(prop.type) // <--- Usando Utils
+                type: FlowUtils.normalizeType(prop.type)
             }));
         }
     }
@@ -87,7 +81,21 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('node:click', ({ node }) => this.ngZone.run(() => this.selectCell(node)));
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
-        this.graph.on('node:dblclick', ({ node }) => this.ngZone.run(() => { this.openConfigSidebar(node); this.cdr.detectChanges(); }));
+
+        // --- LÓGICA DO DUPLO CLIQUE (A GRANDE MUDANÇA) ---
+        this.graph.on('node:dblclick', ({ node }) => {
+            this.ngZone.run(() => {
+                const type = node.getData()?.type;
+
+                if (type === 'if') {
+                    // Se for IF, abre a sidebar interna do Angular (como antes)
+                    this.openIfConfig(node);
+                } else {
+                    // Se for Ação, chama o Legado para abrir a Modal dele
+                    this.fireLegacyModal(node);
+                }
+            });
+        });
 
         this.graph.on('edge:mouseenter', ({ edge }) => {
             edge.addTools([{ name: 'button-remove', args: { distance: '50%', offset: 0, onClick: () => edge.remove() } }]);
@@ -96,7 +104,7 @@ export class FlowEditorComponent implements AfterViewInit {
     }
     // #endregion
 
-    // #region 2. Nós (Add/Drag)
+    // #region 2. Manipulação de Nós (Add/Drag)
     addNode(type: string, toolLabel?: string, position?: { x: number, y: number }) {
         const x = position ? position.x : 100 + Math.random() * 200;
         const y = position ? position.y : 100 + Math.random() * 200;
@@ -116,7 +124,8 @@ export class FlowEditorComponent implements AfterViewInit {
         } else {
             this.graph.addNode({
                 x: finalX, y: finalY, width: 160, height: 70,
-                data: { type: type, label: toolLabel || type },
+                // Iniciamos a config vazia. O legado vai preencher via 'updateNodeData' se quiser.
+                data: { type: type, label: toolLabel || type, config: {} },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: { body: { fill: '#ffffff', stroke: '#ccc', strokeWidth: 2, strokeDasharray: '5,5', rx: 6, ry: 6 }, ...commonAttrs },
                 ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'out', id: 'out' }] },
@@ -128,9 +137,7 @@ export class FlowEditorComponent implements AfterViewInit {
         event.dataTransfer?.setData('application/json', JSON.stringify({ type, label }));
     }
 
-    onDragOver(event: DragEvent) {
-        event.preventDefault();
-    }
+    onDragOver(event: DragEvent) { event.preventDefault(); }
 
     onDrop(event: DragEvent) {
         event.preventDefault();
@@ -144,58 +151,63 @@ export class FlowEditorComponent implements AfterViewInit {
     }
     // #endregion
 
-    // #region 3. Configuração
-    openConfigSidebar(node: any) {
+    // #region 3. Configuração (Apenas IF) e Ponte Legada
+
+    // Abre a sidebar APENAS para o IF
+    openIfConfig(node: any) {
         this.editingNode = node;
         const data = node.getData();
 
-        // Resets
+        // Reseta estados
         this.selectedProperty = null;
         this.availableOperators = [];
         this.selectedOperator = '';
         this.conditionValue = '';
-        this.editingNodeLabel = '';
-        this.dynamicValues = {};
-        this.currentSchema = null;
 
-        if (data.type === 'if') {
-            if (data.conditionData) {
-                this.selectedProperty = this.properties.find(p => p.id === data.conditionData.propertyId) || null;
-                if (this.selectedProperty) {
-                    this.updateOperators();
-                    this.selectedOperator = data.conditionData.operator;
-                    this.conditionValue = data.conditionData.value;
-                }
-            }
-        } else {
-            this.editingNodeLabel = node.attr('label/text') || data.label || '';
-            const schema = this.schemas.find(s => s.type === data.type);
-            if (schema) {
-                this.currentSchema = schema;
-                this.prepareFormSections(schema);
-                this.dynamicValues = { ...(data.config || {}) };
-                setTimeout(() => this.loadSavedLabels(), 50);
+        if (data.conditionData) {
+            this.selectedProperty = this.properties.find(p => p.id === data.conditionData.propertyId) || null;
+            if (this.selectedProperty) {
+                this.updateOperators();
+                this.selectedOperator = data.conditionData.operator;
+                this.conditionValue = data.conditionData.value;
             }
         }
+
         this.showConfig = true;
+        this.cdr.detectChanges();
     }
 
+    // Chama o Legado
+    fireLegacyModal(node: any) {
+        if (this.control && this.control.onEditNode) {
+            const data = node.getData();
+            console.log("📡 Chamando Legado para editar nó:", node.id);
+            // Passamos ID, Tipo e a Configuração Atual (que pode estar vazia ou cheia)
+            this.control.onEditNode(node.id, data.type, data.config || {});
+        } else {
+            console.warn("⚠️ Método 'onEditNode' não definido no control!");
+            this.showSystemAlert("Aviso", "Edição indisponível (Ponte desconectada).");
+        }
+    }
+
+    // Salva a sidebar do IF
     saveConfiguration() {
         if (!this.editingNode) return;
         const currentData = this.editingNode.getData();
 
+        // Só temos lógica de salvar para IF agora
         if (currentData.type === 'if') {
             if (this.selectedProperty && this.selectedOperator) {
                 const opLabel = this.availableOperators.find((op: any) => op.id === this.selectedOperator)?.label;
                 let displayText = `${this.selectedProperty.label}\n${opLabel}`;
                 if (this.selectedProperty.type !== 'boolean') displayText += ` ${this.conditionValue}`;
 
-                this.editingNode.setData({ ...currentData, conditionData: { propertyId: this.selectedProperty.id, operator: this.selectedOperator, value: this.conditionValue } });
+                this.editingNode.setData({
+                    ...currentData,
+                    conditionData: { propertyId: this.selectedProperty.id, operator: this.selectedOperator, value: this.conditionValue }
+                });
                 this.editingNode.attr('label/text', displayText);
             }
-        } else {
-            this.editingNode.attr('label/text', this.editingNodeLabel);
-            this.editingNode.setData({ ...currentData, label: this.editingNodeLabel, config: this.dynamicValues });
         }
         this.closeConfig();
     }
@@ -203,14 +215,29 @@ export class FlowEditorComponent implements AfterViewInit {
     closeConfig() {
         this.showConfig = false;
         this.editingNode = null;
-        setTimeout(() => { this.configMaximized = false; }, 300);
         this.cdr.detectChanges();
     }
 
-    private prepareFormSections(schema: Models.ToolSchema) {
-        this.uiConfigSections = [];
-        if (!schema) return;
-        this.uiConfigSections = schema.sections || (schema.fields ? [{ title: 'Geral', fields: schema.fields, expanded: true }] : []);
+    // Método chamado PELO LEGADO quando a modal fecha e salva
+    public apiUpdateNodeData(nodeId: string, newConfig: any, newLabel?: string) {
+        const cell = this.graph.getCellById(nodeId);
+        if (cell && cell.isNode()) {
+            const currentData = cell.getData();
+
+            // Atualiza os dados internos
+            cell.setData({
+                ...currentData,
+                config: newConfig,
+                label: newLabel || currentData.label
+            });
+
+            // Atualiza visualmente o texto se mudou
+            if (newLabel) {
+                cell.attr('label/text', newLabel);
+            }
+
+            console.log(`✅ Nó ${nodeId} atualizado pelo Legado.`);
+        }
     }
 
     onPropertyChange() {
@@ -221,7 +248,6 @@ export class FlowEditorComponent implements AfterViewInit {
 
     updateOperators() {
         if (this.selectedProperty) {
-            // <--- Usando CONSTANTE importada
             this.availableOperators = OPERATORS_BY_TYPE[this.selectedProperty.type] || [];
         }
     }
@@ -230,81 +256,17 @@ export class FlowEditorComponent implements AfterViewInit {
     toggleMaximize() { this.configMaximized = !this.configMaximized; }
     // #endregion
 
-    // #region 4. Relations (API)
-    loadRelationData(field: Models.ToolField, isScroll = false) {
-        if (!this.control?.searchRelation) return;
-        const key = field.property;
-        const state = this.relationState[key];
-        if (state.loading || (isScroll && !state.hasMore)) return;
-
-        state.loading = true;
-        this.control.searchRelation(field.class, state.search, state.page, field.filter || {})
-            .then((response: any) => {
-                state.options = state.page === 1 ? response.items : [...state.options, ...response.items];
-                state.hasMore = response.hasMore;
-                state.page++;
-                state.loading = false;
-            })
-            .catch(() => state.loading = false);
-    }
-
-    onRelationSearch(field: Models.ToolField, event: any) {
-        const key = field.property;
-        this.relationState[key].search = event.target.value;
-        this.relationState[key].page = 1;
-        this.relationState[key].hasMore = true;
-        if (this.relationState[key].timeout) clearTimeout(this.relationState[key].timeout);
-        this.relationState[key].timeout = setTimeout(() => this.loadRelationData(field), 500);
-    }
-
-    onRelationScroll(field: Models.ToolField, event: any) {
-        if (event.target.scrollHeight - event.target.scrollTop <= event.target.clientHeight + 20) {
-            this.loadRelationData(field, true);
-        }
-    }
-
-    selectRelationItem(field: Models.ToolField, item: any) {
-        const key = field.property;
-        this.dynamicValues[key] = item.id;
-        this.relationState[key].selectedLabel = item.label;
-        this.relationState[key].open = false;
-    }
-
-    toggleRelation(field: Models.ToolField) {
-        const key = field.property;
-        if (!this.relationState[key]) {
-            this.relationState[key] = { options: [], page: 1, loading: false, open: false, search: '', hasMore: true };
-            this.loadRelationData(field);
-        }
-        this.relationState[key].open = !this.relationState[key].open;
-    }
-
-    private loadSavedLabels() {
-        if (!this.dynamicValues || !this.uiConfigSections) return;
-        this.uiConfigSections.forEach(section => {
-            section.fields?.forEach((field: any) => {
-                if (field.type === 'relation' && this.dynamicValues[field.property]) {
-                    const key = field.property;
-                    if (!this.relationState[key]) this.relationState[key] = { options: [], open: false, selectedLabel: null };
-                    if (this.relationState[key].selectedLabel) return;
-
-                    this.relationState[key].selectedLabel = `Carregando...`;
-                    this.control?.getRelationLabel?.(field.class, this.dynamicValues[key])
-                        .then((res: any) => { this.relationState[key].selectedLabel = res.label; this.cdr.detectChanges(); });
-                }
-            });
-        });
-    }
-    // #endregion
-
-    // #region 5. IO e Validação
+    // #region 4. Validação e Exportação
     public getExportData() {
-        if (!this.validateProject()) return null; // Validação
+        if (!this.validateProject()) return null;
 
         const fullGraph = this.graph.toJSON();
         const logicData = {
             nodes: fullGraph.cells.filter((c: any) => c.shape !== 'edge').map((n: any) => ({
-                id: n.id, type: n.data?.type, label: n.data?.label,
+                id: n.id,
+                type: n.data?.type,
+                label: n.data?.label,
+                // Para IF: manda conditionData. Para Ação: manda o config (que veio do legado)
                 config: n.data?.type === 'if' ? (n.data.conditionData || {}) : (n.data?.config || {})
             })),
             edges: fullGraph.cells.filter((c: any) => c.shape === 'edge').map((e: any) => ({
@@ -320,7 +282,7 @@ export class FlowEditorComponent implements AfterViewInit {
             if (!graphData) return false;
             this.graph.fromJSON(graphData);
             this.graph.zoomToFit({ padding: 20, maxScale: 1 });
-            this.showSystemAlert('Sucesso', 'Projeto importado!', 'success');
+            this.showSystemAlert('Sucesso', 'Projeto carregado!', 'success');
             return true;
         } catch {
             this.showSystemAlert('Erro', 'Arquivo inválido.', 'warning');
@@ -338,31 +300,15 @@ export class FlowEditorComponent implements AfterViewInit {
             const data = node.getData();
             if (data.type === 'start') continue;
 
+            // Validação APENAS para o IF (que é nossa responsabilidade)
             if (data.type === 'if') {
                 const c = data.conditionData;
                 if (!c || !c.propertyId || !c.operator) {
                     this.handleValidationError(node, 'Configure a regra do IF.');
                     return false;
                 }
-            } else {
-                const schema = this.schemas.find(s => s.type === data.type);
-                if (schema) {
-                    let allFields: any[] = [];
-                    if (schema.sections) schema.sections.forEach(s => allFields.push(...s.fields));
-                    else if (schema.fields) allFields = schema.fields;
-
-                    const config = data.config || {};
-                    for (const field of allFields) {
-                        if (field.required) {
-                            const val = config[field.property];
-                            if (val === undefined || val === null || val === '' || (Array.isArray(val) && val.length === 0)) {
-                                this.handleValidationError(node, `Campo "${field.label}" obrigatório.`);
-                                return false;
-                            }
-                        }
-                    }
-                }
             }
+            // Ações comuns: Assumimos que o legado validou na modal dele ou permitimos salvar incompleto
         }
         return true;
     }
@@ -373,24 +319,18 @@ export class FlowEditorComponent implements AfterViewInit {
         this.showSystemAlert('Atenção', message, 'warning');
     }
 
-    // --- Usando Utils para arquivos ---
-    saveProjectFile() {
-        FlowUtils.downloadJson(this.graph.toJSON());
-    }
-
+    // Arquivos locais
+    saveProjectFile() { FlowUtils.downloadJson(this.graph.toJSON()); }
     triggerFileInput() { document.getElementById('fileInput')?.click(); }
-
     onFileSelected(event: any) {
         const file = event.target.files[0];
         if (!file) return;
-        FlowUtils.readJsonFile(file)
-            .then(json => this.importData(json))
-            .catch(() => this.showSystemAlert('Erro', 'Erro ao ler arquivo.', 'warning'));
+        FlowUtils.readJsonFile(file).then(json => this.importData(json));
         event.target.value = '';
     }
     // #endregion
 
-    // #region 6. Utilitários UI
+    // #region 5. Utilitários UI
     selectCell(cell: Cell) {
         this.resetSelection();
         this.selectedCell = cell;
@@ -428,7 +368,6 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     confirmModalAction() { this.modalState.pendingAction?.(); this.closeModal(); }
-
     closeModal() {
         this.modalState.visible = false; this.modalState.pendingAction = null;
         this.cdr.detectChanges();
