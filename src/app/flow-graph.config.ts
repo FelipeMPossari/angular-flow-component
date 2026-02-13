@@ -78,6 +78,21 @@ export const getGraphOptions = (container: HTMLElement) => ({
         enabled: true,
         modifiers: ['ctrl', 'meta'] as ('ctrl' | 'meta')[],
     },
+
+    interacting: (cellView: any) => {
+        const cell = cellView.cell;
+        const data = cell.getData();
+
+        if (cell.isNode() && data?.type === 'start') {
+            return {
+                nodeMovable: false,
+                magnetConnectable: true
+            };
+        }
+
+        return true;
+    },
+
     connecting: {
         router: 'manhattan',
         connector: { name: 'rounded', args: { radius: 8 } },

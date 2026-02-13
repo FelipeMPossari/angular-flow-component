@@ -51,11 +51,57 @@ export class FlowEditorComponent implements AfterViewInit {
         }
     }
 
+    addStartNode() {
+        // 1. Verifica se já existe para não duplicar
+        const existingStart = this.graph.getNodes().find(n => n.getData()?.type === 'start');
+        if (existingStart) {
+            existingStart.prop('movable', false); // Garante que esteja travado
+            return;
+        }
+
+        const startNode = this.graph.addNode({
+            x: 60, // Posição Fixa X
+            y: 60, // Posição Fixa Y
+            width: 70,
+            height: 70,
+            shape: 'circle',
+            data: { type: 'start', label: 'Início' },
+            attrs: {
+                body: {
+                    fill: '#f6ffed',
+                    stroke: '#0099ff',
+                    strokeWidth: 2,
+                },
+                label: {
+                    text: 'Início',
+                    fill: '#0099ff',
+                    fontWeight: 'bold',
+                    fontSize: 12
+                }
+            },
+            ports: {
+                items: [
+                    {
+                        group: 'out',
+                        id: 'out',
+                        args: { x: '100%', y: '50%' },
+                        attrs: { circle: { magnet: true } }
+                    }
+                ],
+                groups: PORT_GROUPS
+            }
+        });
+
+        // 2. Trava movimentação
+        startNode.prop('movable', false);
+    }
+
     private initGraph() {
         const options = getGraphOptions(this.container.nativeElement);
         options.connecting.validateConnection = (args: any) => validateConnectionRule({ ...args, graph: this.graph });
         this.graph = new Graph(options);
         this.registerEvents();
+        this.addStartNode();
     }
 
     private registerEvents() {
@@ -66,6 +112,7 @@ export class FlowEditorComponent implements AfterViewInit {
         // --- DUPLO CLIQUE: AGORA É SEMPRE RESPONSABILIDADE DO LEGADO ---
         this.graph.on('node:dblclick', ({ node }) => {
             this.ngZone.run(() => {
+                if (node.getData()?.type === 'start') return;
                 this.fireLegacyModal(node);
             });
         });
@@ -171,21 +218,68 @@ export class FlowEditorComponent implements AfterViewInit {
 
     // #region 4. IO e Validação
     public getExportData() {
-        // Validação Simplificada: O Angular apenas verifica se tem arestas soltas
-        // A validação de "Campo Obrigatório" agora é responsabilidade da Modal do Legado antes de salvar.
+        // 1. Encontra o nó de início
+        const startNode = this.graph.getNodes().find(n => n.getData()?.type === 'start');
 
+        // Validação Crítica: O nó start precisa existir
+        if (!startNode) {
+            this.addStartNode(); // Tenta corrigir automaticamente se sumiu
+            this.showSystemAlert('Erro', 'Nó de início não encontrado. Tente novamente.', 'warning');
+            return null;
+        }
+
+        // 2. Validações de Conexão do Início
+        const outgoingEdges = this.graph.getOutgoingEdges(startNode);
+
+        // Regra: Tem que ter conexão
+        if (!outgoingEdges || outgoingEdges.length === 0) {
+            this.selectCell(startNode);
+            this.showSystemAlert('Atenção', 'O fluxo precisa ter um começo! Conecte o "Início" a uma ação.', 'warning');
+            return null;
+        }
+
+        // Regra: Só pode ter uma saída
+        if (outgoingEdges.length > 1) {
+            this.selectCell(startNode);
+            this.showSystemAlert('Atenção', 'O "Início" só pode ter uma saída. Use um IF ou Split depois dele se precisar bifurcar.', 'warning');
+            return null;
+        }
+
+        // 3. Identifica o ID do primeiro passo real (para facilitar pro backend)
+        let firstStepId = null;
+        const target = outgoingEdges[0].getTargetCell();
+        if (target && target.isNode()) {
+            firstStepId = target.id;
+        }
+
+        // 4. Monta o JSON Final
         const fullGraph = this.graph.toJSON();
+
         const logicData = {
-            nodes: fullGraph.cells.filter((c: any) => c.shape !== 'edge').map((n: any) => ({
-                id: n.id,
-                type: n.data?.type,
-                label: n.data?.label,
-                config: n.data?.config || {} // Tudo está aqui dentro agora
-            })),
-            edges: fullGraph.cells.filter((c: any) => c.shape === 'edge').map((e: any) => ({
-                source: e.source.cell, target: e.target.cell, sourcePort: e.source.port
-            }))
+            // Atalho para o backend saber onde começar sem ter que buscar o nó 'start'
+            firstStepId: firstStepId,
+
+            // Lista de nós (incluindo o Start e as Ações)
+            nodes: fullGraph.cells
+                .filter((c: any) => c.shape !== 'edge')
+                .map((n: any) => ({
+                    id: n.id,
+                    type: n.data?.type,
+                    label: n.data?.label,
+                    // Garante que 'config' sempre exista, mesmo vazio
+                    config: n.data?.config || {}
+                })),
+
+            // Lista de arestas (incluindo a que sai do Start)
+            edges: fullGraph.cells
+                .filter((c: any) => c.shape === 'edge')
+                .map((e: any) => ({
+                    source: e.source.cell,
+                    target: e.target.cell,
+                    sourcePort: e.source.port
+                }))
         };
+
         return { logic: logicData, graph: fullGraph };
     }
 
@@ -194,6 +288,7 @@ export class FlowEditorComponent implements AfterViewInit {
             const graphData = typeof data === 'string' ? JSON.parse(data) : data;
             if (!graphData) return false;
             this.graph.fromJSON(graphData);
+            this.addStartNode();
             this.graph.zoomToFit({ padding: 20, maxScale: 1 });
             this.showSystemAlert('Sucesso', 'Projeto carregado!', 'success');
             return true;
@@ -204,7 +299,7 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     public clearCanvas() {
-        this.showSystemConfirm('Limpar', 'Deseja apagar tudo?', () => this.graph.clearCells());
+        this.graph.clearCells();
     }
 
     // Arquivos
@@ -241,6 +336,9 @@ export class FlowEditorComponent implements AfterViewInit {
     @HostListener('window:keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
         if ((event.key === 'Delete' || event.key === 'Backspace') && this.selectedCell) {
+            if (this.selectedCell.isNode() && this.selectedCell.getData()?.type === 'start')
+                return;
+
             this.graph.removeCell(this.selectedCell);
             this.selectedCell = null;
         }
