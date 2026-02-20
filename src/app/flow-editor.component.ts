@@ -274,9 +274,11 @@ export class FlowEditorComponent implements AfterViewInit {
             edges: fullGraph.cells
                 .filter((c: any) => c.shape === 'edge')
                 .map((e: any) => ({
+                    id: e.id,
                     source: e.source.cell,
                     target: e.target.cell,
-                    sourcePort: e.source.port
+                    sourcePort: e.source.port,
+                    targetPort: e.target.port
                 }))
         };
 
@@ -290,16 +292,15 @@ export class FlowEditorComponent implements AfterViewInit {
             this.graph.fromJSON(graphData);
             this.addStartNode();
             this.graph.zoomToFit({ padding: 20, maxScale: 1 });
-            this.showSystemAlert('Sucesso', 'Projeto carregado!', 'success');
             return true;
         } catch {
-            this.showSystemAlert('Erro', 'Arquivo inválido.', 'warning');
             return false;
         }
     }
 
     public clearCanvas() {
         this.graph.clearCells();
+        this.addStartNode();
     }
 
     // Arquivos
