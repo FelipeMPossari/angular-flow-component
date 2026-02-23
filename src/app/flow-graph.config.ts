@@ -1,7 +1,5 @@
-// flow-graph.config.ts
 import { Shape } from '@antv/x6';
 
-// Estilos padronizados para Labels
 export const LABEL_STYLE = {
     fill: '#333',
     fontSize: 14,
@@ -18,7 +16,6 @@ export const LABEL_STYLE = {
     }
 };
 
-// Definição das Portas (Bolinhas de conexão)
 export const PORT_GROUPS = {
     in: {
         position: 'left',
@@ -38,38 +35,61 @@ export const PORT_GROUPS = {
     },
 };
 
-// Regra de Validação de Conexões (Lógica complexa isolada)
-export const validateConnectionRule = ({ sourceView, targetView, sourceMagnet, targetMagnet, graph }: any) => {
+// Adicionamos o parâmetro 'edge' aqui no destructuring
+export const validateConnectionRule = ({ edge, sourceView, targetView, sourceMagnet, targetMagnet, graph }: any) => {
     if (!sourceMagnet || !targetMagnet || !sourceView || !targetView) return false;
 
     const sourceGroup = sourceMagnet.getAttribute('port-group');
     const targetGroup = targetMagnet.getAttribute('port-group');
 
-    // 1. Sentido Obrigatório: Saída -> Entrada
+    // 1. Sentido Obrigatório (Saída para Entrada)
     if (sourceGroup === 'in') return false;
     if (targetGroup !== 'in') return false;
 
-    // 2. Unicidade: Não permitir duplicar a mesma conexão
+    const sourceNode = sourceView.cell;
+    const targetNode = targetView.cell;
+    const sourceType = sourceNode.getData()?.type;
+    const targetType = targetNode.getData()?.type;
     const sourcePortId = sourceMagnet.getAttribute('port');
-    const targetPortId = targetMagnet.getAttribute('port');
-    const targetNodeId = targetView.cell.id;
 
-    const outgoingEdges = graph.getOutgoingEdges(sourceView.cell);
-    if (outgoingEdges) {
-        const isDuplicate = outgoingEdges.some((edge: any) => {
-            const target = edge.getTargetCell();
-            if (target && target.id === targetNodeId) {
-                return edge.getTargetPortId() === targetPortId && edge.getSourcePortId() === sourcePortId;
-            }
-            return false;
-        });
-        if (isDuplicate) return false;
+    // 2. Bloqueio dinâmico (A porta foi ocultada visualmente via evento)
+    if (sourceNode.getPortProp(sourcePortId, 'disabled')) return false;
+
+    // 3. Ações NUNCA podem ter saída (elas são folhas da árvore)
+    if (sourceType !== 'if' && sourceType !== 'and' && sourceType !== 'or') return false;
+
+    // 4. Condição não liga em Condição (Força o uso de AND/OR para encadear)
+    if (sourceType === 'if' && targetType === 'if') return false;
+
+    // 5. Condição só liga em AND/OR pela porta TRUE
+    if (sourceType === 'if' && (targetType === 'and' || targetType === 'or')) {
+        if (sourcePortId === 'falseOut') return false;
     }
 
-    return true;
+    // 6. EXCLUSIVIDADE DE PORTA (A bolinha só aceita UMA linha)
+    const outgoingEdges = graph.getOutgoingEdges(sourceNode) || [];
+    const portAlreadyConnected = outgoingEdges.some((e: any) => e.getSourcePortId() === sourcePortId && e.id !== edge.id);
+    if (portAlreadyConnected) return false;
+
+    // 7. ENTRADA ÚNICA PARA AÇÕES (Forçar o uso do OR)
+    // Se o destino for uma Ação...
+    if (targetType !== 'if' && targetType !== 'and' && targetType !== 'or') {
+        const incomingEdges = graph.getIncomingEdges(targetNode) || [];
+        // Verifica se a ação já tem uma linha chegando nela que não seja a que o usuário está segurando
+        const actionAlreadyHasInput = incomingEdges.some((e: any) => e.id !== edge.id);
+        if (actionAlreadyHasInput) return false;
+    }
+
+    // 8. PREVENÇÃO DE LOOP INFINITO (Grafo Acíclico)
+    // O motor do X6 busca todos os "pais" e "avós" do nó de origem.
+    // Se o nó de destino já estiver na árvore genealógica de origem, ligar eles cria um curto-circuito (loop).
+    const predecessors = graph.getPredecessors(sourceNode) || [];
+    const isLoop = predecessors.some((p: any) => p.id === targetNode.id);
+    if (isLoop) return false;
+
+    return true; // Se sobreviveu a tudo isso, a conexão é perfeitamente válida!
 };
 
-// Configuração Geral do X6
 export const getGraphOptions = (container: HTMLElement) => ({
     container: container,
     grid: { size: 20, visible: true, type: 'mesh', args: { color: '#e0e0e0' } },
@@ -78,21 +98,7 @@ export const getGraphOptions = (container: HTMLElement) => ({
         enabled: true,
         modifiers: ['ctrl', 'meta'] as ('ctrl' | 'meta')[],
     },
-
-    interacting: (cellView: any) => {
-        const cell = cellView.cell;
-        const data = cell.getData();
-
-        if (cell.isNode() && data?.type === 'start') {
-            return {
-                nodeMovable: false,
-                magnetConnectable: true
-            };
-        }
-
-        return true;
-    },
-
+    interacting: true, // Removido o bloqueio do nó start
     connecting: {
         router: 'manhattan',
         connector: { name: 'rounded', args: { radius: 8 } },
@@ -109,8 +115,6 @@ export const getGraphOptions = (container: HTMLElement) => ({
                 zIndex: 0
             });
         },
-        // A validação será injetada no componente pois precisa do contexto 'this' se usar variaveis locais,
-        // mas como isolamos a lógica pura acima, podemos usar assim:
         validateConnection: validateConnectionRule
     },
 });

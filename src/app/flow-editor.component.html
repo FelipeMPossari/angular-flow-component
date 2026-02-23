@@ -1,6 +1,25 @@
 <div class="app-container">
 
     <div class="sidebar">
+        <h3 style="margin: 5px 0; font-size: 13px; text-transform: uppercase;">Lógica</h3>
+
+        <button (click)="addNode('if')" draggable="true" (dragstart)="onDragStart($event, 'if', 'Condição')"
+            style="border-left: 4px solid #faad14; background: #fffbe6; cursor: grab;">
+            ⚖️ Condição
+        </button>
+
+        <button (click)="addNode('and')" draggable="true" (dragstart)="onDragStart($event, 'and', 'E')"
+            style="border-left: 4px solid #198754; background: #d1e7dd; cursor: grab; margin-top: 5px;">
+            ➕ E
+        </button>
+
+        <button (click)="addNode('or')" draggable="true" (dragstart)="onDragStart($event, 'or', 'OU')"
+            style="border-left: 4px solid #084298; background: #cfe2ff; cursor: grab; margin-top: 5px;">
+            🔀 OU
+        </button>
+
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 15px 0 10px 0;">
+
         <div class="section-header" (click)="toggleActions()">
             <h3>Ações</h3>
             <button class="toggle-btn">{{ showActions ? '▼' : '▶' }}</button>
@@ -14,29 +33,22 @@
             </button>
         </div>
 
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
+        <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px;">
+            <button (click)="triggerFileInput()"
+                style="width: 100%; border-color: #1890ff; color: #1890ff; background: #e6f7ff;">
+                📂 Importar Fluxo
+            </button>
 
-        <h3 style="margin: 5px 0;; font-size: 12px; text-transform: uppercase;">Lógica</h3>
+            <input type="file" id="fileInput" style="display: none;" accept=".json" (change)="onFileSelected($event)">
 
-        <button (click)="addNode('if')" draggable="true" (dragstart)="onDragStart($event, 'if', 'Condição')"
-            style="border-left: 4px solid #faad14; background: #fffbe6; cursor: grab;">
-            🔀 Condição
-        </button>
+            <button (click)="confirmClearCanvas()"
+                style="width: 100%; margin-top: 5px; border-color: #ff4d4f; color: #ff4d4f;">
+                🗑️ Limpar Fluxo
+            </button>
+        </div>
 
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
-
-        <button (click)="triggerFileInput()"
-            style="margin-top: 5px; border-color: #1890ff; color: #1890ff; background: #e6f7ff;">
-            📂 Importar Fluxo
-        </button>
-
-        <input type="file" id="fileInput" style="display: none;" accept=".json" (change)="onFileSelected($event)">
-
-        <button (click)="clearCanvas()" style="margin-top: 5px; border-color: #ff4d4f; color: #ff4d4f;">
-            🗑️ Limpar Fluxo
-        </button>
-
-        <div class="instruction">
+        <div class="instruction"
+            style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; padding-bottom: 0px;">
             <small>🖱️ Arrastar e Conectar</small><br>
             <small>🗑️ Delete para apagar</small><br>
             <small>✏️ Clique Duplo para Editar</small>

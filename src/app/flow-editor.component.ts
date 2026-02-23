@@ -20,24 +20,18 @@ import { FlowUtils } from './flow.utils';
 export class FlowEditorComponent implements AfterViewInit {
     @ViewChild('container', { static: true }) container!: ElementRef;
 
-    // --- INPUTS ---
     @Input() tools: Models.FlowTool[] = [];
-    // @Input() properties REMOVIDO: O legado que gerencia as propriedades do IF agora
-    @Input() control: any; // A Ponte é a única coisa que importa agora
+    @Input() control: any;
 
     @Output() saveGraph = new EventEmitter<Models.WorkflowDefinition>();
 
-    // --- ESTADO ---
     private graph!: Graph;
     selectedCell: Cell | null = null;
-
-    // UI (Só sobrou a sidebar de ferramentas e o modal de alerta)
     showActions = true;
     modalState: Models.ModalState = { visible: false, type: 'alert', title: '', message: '', confirmLabel: 'OK', pendingAction: null };
 
     constructor(private ngZone: NgZone, private cdr: ChangeDetectorRef) { }
 
-    // #region 1. Lifecycle
     ngAfterViewInit() {
         this.initGraph();
     }
@@ -51,57 +45,11 @@ export class FlowEditorComponent implements AfterViewInit {
         }
     }
 
-    addStartNode() {
-        // 1. Verifica se já existe para não duplicar
-        const existingStart = this.graph.getNodes().find(n => n.getData()?.type === 'start');
-        if (existingStart) {
-            existingStart.prop('movable', false); // Garante que esteja travado
-            return;
-        }
-
-        const startNode = this.graph.addNode({
-            x: 60, // Posição Fixa X
-            y: 60, // Posição Fixa Y
-            width: 70,
-            height: 70,
-            shape: 'circle',
-            data: { type: 'start', label: 'Início' },
-            attrs: {
-                body: {
-                    fill: '#f6ffed',
-                    stroke: '#0099ff',
-                    strokeWidth: 2,
-                },
-                label: {
-                    text: 'Início',
-                    fill: '#0099ff',
-                    fontWeight: 'bold',
-                    fontSize: 12
-                }
-            },
-            ports: {
-                items: [
-                    {
-                        group: 'out',
-                        id: 'out',
-                        args: { x: '100%', y: '50%' },
-                        attrs: { circle: { magnet: true } }
-                    }
-                ],
-                groups: PORT_GROUPS
-            }
-        });
-
-        // 2. Trava movimentação
-        startNode.prop('movable', false);
-    }
-
     private initGraph() {
         const options = getGraphOptions(this.container.nativeElement);
         options.connecting.validateConnection = (args: any) => validateConnectionRule({ ...args, graph: this.graph });
         this.graph = new Graph(options);
         this.registerEvents();
-        this.addStartNode();
     }
 
     private registerEvents() {
@@ -109,10 +57,10 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
 
-        // --- DUPLO CLIQUE: AGORA É SEMPRE RESPONSABILIDADE DO LEGADO ---
         this.graph.on('node:dblclick', ({ node }) => {
             this.ngZone.run(() => {
-                if (node.getData()?.type === 'start') return;
+                const type = node.getData()?.type;
+                if (type === 'and' || type === 'or') return; // Portas lógicas não tem edição
                 this.fireLegacyModal(node);
             });
         });
@@ -121,34 +69,100 @@ export class FlowEditorComponent implements AfterViewInit {
             edge.addTools([{ name: 'button-remove', args: { distance: '50%', offset: 0, onClick: () => edge.remove() } }]);
         });
         this.graph.on('edge:mouseleave', ({ edge }) => edge.removeTools());
-    }
-    // #endregion
 
-    // #region 2. Manipulação de Nós
+        // Esconde a porta falseOut quando ligar num AND/OR e limpa linhas órfãs
+        this.graph.on('edge:connected', ({ edge }) => {
+            const source = edge.getSourceCell() as Cell;
+            const target = edge.getTargetCell() as Cell;
+            if (!source || !target || !source.isNode() || !target.isNode()) return;
+
+            const sourceType = source.getData()?.type;
+            const targetType = target.getData()?.type;
+            const sourcePort = edge.getSourcePortId();
+
+            if (sourceType === 'if' && (targetType === 'and' || targetType === 'or'))
+                if (sourcePort === 'trueOut') {
+
+                    // 1. Busca se tem alguma linha presa na porta falsa e destrói ela
+                    const outgoingEdges = this.graph.getOutgoingEdges(source) || [];
+                    outgoingEdges.filter(e => e.getSourcePortId() === 'falseOut').forEach(e => this.graph.removeCell(e));
+
+                    // 2. Some com a bolinha vermelha visualmente
+                    source.setPortProp('falseOut', 'attrs/circle/style', { display: 'none' });
+                    source.setPortProp('falseOut', 'disabled', true);
+                }
+        });
+
+        // Restaura a porta falseOut quando a linha for removida
+        this.graph.on('edge:removed', ({ edge }) => {
+            const sourceInfo = edge.getSource() as any;
+            if (!sourceInfo || !sourceInfo.cell) return;
+
+            const sourceNode = this.graph.getCellById(sourceInfo.cell);
+            if (!sourceNode || !sourceNode.isNode()) return;
+
+            const sourceType = sourceNode.getData()?.type;
+            const sourcePort = sourceInfo.port;
+
+            if (sourceType === 'if' && sourcePort === 'trueOut') {
+                // VERIFICAÇÃO DE LINHA FANTASMA:
+                // Pega todas as linhas que ainda estão saindo deste nó
+                const outgoingEdges = this.graph.getOutgoingEdges(sourceNode) || [];
+
+                // Checa se ainda existe alguma linha saindo do trueOut ligada a um AND/OR
+                const isStillConnected = outgoingEdges.some(e => {
+                    const targetNode = e.getTargetCell();
+                    if (!targetNode || !targetNode.isNode()) return false;
+
+                    const tType = targetNode.getData()?.type;
+                    return e.getSourcePortId() === 'trueOut' && (tType === 'and' || tType === 'or');
+                });
+
+                // Se não houver mais nenhuma ligação real, aí sim devolvemos a porta
+                if (!isStillConnected) {
+                    sourceNode.setPortProp('falseOut', 'attrs/circle/style', { display: '' });
+                    sourceNode.setPortProp('falseOut', 'disabled', false);
+                }
+            }
+        });
+    }
+
     addNode(type: string, toolLabel?: string, position?: { x: number, y: number }) {
         const x = position ? position.x : 100 + Math.random() * 200;
         const y = position ? position.y : 100 + Math.random() * 200;
         const finalX = position ? x - 80 : x;
         const finalY = position ? y - 35 : y;
 
-        const commonAttrs = { label: { text: toolLabel || (type === 'if' ? 'IF' : type), ...LABEL_STYLE } };
+        const commonAttrs = { label: { text: toolLabel || type.toUpperCase(), ...LABEL_STYLE } };
 
         if (type === 'if') {
             this.graph.addNode({
                 x: finalX, y: finalY, width: 160, height: 70,
-                // Padronizamos: tudo fica dentro de 'config', inclusive a condição
                 data: { type: 'if', config: {} },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: { body: { fill: '#fffbe6', stroke: '#faad14', strokeWidth: 2, rx: 6, ry: 6 }, ...commonAttrs },
                 ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'trueOut', id: 'trueOut' }, { group: 'falseOut', id: 'falseOut' }] },
             });
+        } else if (type === 'and' || type === 'or') {
+            const isAnd = type === 'and';
+            this.graph.addNode({
+                x: finalX, y: finalY, width: 80, height: 30,
+                data: { type, config: {} },
+                markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
+                attrs: {
+                    body: { fill: isAnd ? '#d1e7dd' : '#cfe2ff', stroke: isAnd ? '#0f5132' : '#084298', strokeWidth: 2, rx: 6, ry: 6 },
+                    label: { text: isAnd ? 'E' : 'OU', fill: isAnd ? '#0f5132' : '#084298', fontWeight: 'bold' }
+                },
+                ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'trueOut', id: 'trueOut' }, { group: 'falseOut', id: 'falseOut' }] },
+            });
         } else {
+            // AÇÕES: Apenas porta de entrada
             this.graph.addNode({
                 x: finalX, y: finalY, width: 160, height: 70,
                 data: { type: type, label: toolLabel || type, config: {} },
                 markup: [{ tagName: 'rect', selector: 'body' }, { tagName: 'text', selector: 'label' }],
                 attrs: { body: { fill: '#ffffff', stroke: '#ccc', strokeWidth: 2, strokeDasharray: '5,5', rx: 6, ry: 6 }, ...commonAttrs },
-                ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }, { group: 'out', id: 'out' }] },
+                ports: { groups: PORT_GROUPS, items: [{ group: 'in', id: 'in' }] },
             });
         }
     }
@@ -169,108 +183,42 @@ export class FlowEditorComponent implements AfterViewInit {
             this.addNode(type, label, { x, y });
         } catch (e) { console.error(e); }
     }
-    // #endregion
 
-    // #region 3. A Ponte Legada
-
-    // Método único para disparar edição
     fireLegacyModal(node: any) {
-        if (this.control && this.control.onEditNode) {
-            const data = node.getData();
-            console.log("📡 Chamando Legado para editar nó:", node.id, data.type);
-
-            // Enviamos ID, TIPO e a mochila CONFIG
-            // Se for IF, o 'config' conterá { property: '...', operator: '...', value: '...' }
-            this.control.onEditNode(node.id, data.type, data.config || {});
-        } else {
+        if (!this.control?.onEditNode) {
             console.warn("⚠️ Método 'onEditNode' não definido no control!");
+            return;
         }
+        const data = node.getData();
+        this.control.onEditNode(node.id, data.type, data.config || {});
     }
 
-    // O Legado chama isso para devolver os dados
     public apiUpdateNodeData(nodeId: string, newConfig: any, newLabel?: string) {
         const cell = this.graph.getCellById(nodeId);
         if (cell && cell.isNode()) {
             const currentData = cell.getData();
-
-            // Se for IF, atualizamos o label visualmente para ficar fácil de ler no gráfico
             let displayLabel = newLabel || currentData.label;
 
-            // Opcional: Se o legado mandar um label específico já formatado, usamos ele.
-            // Se não, mantemos o anterior.
-
-            cell.setData({
-                ...currentData,
-                config: newConfig, // Atualiza a mochila
-                label: displayLabel
-            });
-
-            if (displayLabel) {
-                cell.attr('label/text', displayLabel);
-            }
-
-            console.log(`✅ Nó ${nodeId} atualizado com sucesso.`);
+            cell.setData({ ...currentData, config: newConfig, label: displayLabel });
+            if (displayLabel) cell.attr('label/text', displayLabel);
         }
     }
 
     toggleActions() { this.showActions = !this.showActions; }
-    // #endregion
 
-    // #region 4. IO e Validação
     public getExportData() {
-        // 1. Encontra o nó de início
-        const startNode = this.graph.getNodes().find(n => n.getData()?.type === 'start');
-
-        // Validação Crítica: O nó start precisa existir
-        if (!startNode) {
-            this.addStartNode(); // Tenta corrigir automaticamente se sumiu
-            this.showSystemAlert('Erro', 'Nó de início não encontrado. Tente novamente.', 'warning');
-            return null;
-        }
-
-        // 2. Validações de Conexão do Início
-        const outgoingEdges = this.graph.getOutgoingEdges(startNode);
-
-        // Regra: Tem que ter conexão
-        if (!outgoingEdges || outgoingEdges.length === 0) {
-            this.selectCell(startNode);
-            this.showSystemAlert('Atenção', 'O fluxo precisa ter um começo! Conecte o "Início" a uma ação.', 'warning');
-            return null;
-        }
-
-        // Regra: Só pode ter uma saída
-        if (outgoingEdges.length > 1) {
-            this.selectCell(startNode);
-            this.showSystemAlert('Atenção', 'O "Início" só pode ter uma saída. Use um IF ou Split depois dele se precisar bifurcar.', 'warning');
-            return null;
-        }
-
-        // 3. Identifica o ID do primeiro passo real (para facilitar pro backend)
-        let firstStepId = null;
-        const target = outgoingEdges[0].getTargetCell();
-        if (target && target.isNode()) {
-            firstStepId = target.id;
-        }
-
-        // 4. Monta o JSON Final
         const fullGraph = this.graph.toJSON();
 
         const logicData = {
-            // Atalho para o backend saber onde começar sem ter que buscar o nó 'start'
-            firstStepId: firstStepId,
-
-            // Lista de nós (incluindo o Start e as Ações)
             nodes: fullGraph.cells
                 .filter((c: any) => c.shape !== 'edge')
                 .map((n: any) => ({
                     id: n.id,
                     type: n.data?.type,
                     label: n.data?.label,
-                    // Garante que 'config' sempre exista, mesmo vazio
                     config: n.data?.config || {}
                 })),
 
-            // Lista de arestas (incluindo a que sai do Start)
             edges: fullGraph.cells
                 .filter((c: any) => c.shape === 'edge')
                 .map((e: any) => ({
@@ -290,7 +238,6 @@ export class FlowEditorComponent implements AfterViewInit {
             const graphData = typeof data === 'string' ? JSON.parse(data) : data;
             if (!graphData) return false;
             this.graph.fromJSON(graphData);
-            this.addStartNode();
             this.graph.zoomToFit({ padding: 20, maxScale: 1 });
             return true;
         } catch {
@@ -298,12 +245,27 @@ export class FlowEditorComponent implements AfterViewInit {
         }
     }
 
-    public clearCanvas() {
-        this.graph.clearCells();
-        this.addStartNode();
+    public confirmClearCanvas() {
+        this.showSystemConfirm('Limpar Fluxo', 'Tem certeza que deseja apagar todo o fluxo desenhado? Esta ação não pode ser desfeita.', () => this.clearCanvas());
     }
 
-    // Arquivos
+    public clearCanvas() {
+        this.graph.clearCells();
+    }
+
+    private showSystemConfirm(title: string, message: string, onConfirm: () => void) {
+        this.modalState = {
+            visible: true,
+            type: 'confirm',
+            title,
+            message,
+            confirmLabel: 'Sim',
+            pendingAction: onConfirm
+        };
+        // Opcional, mas recomendado para garantir que a tela atualize na mesma hora
+        this.cdr.detectChanges();
+    }
+
     saveProjectFile() { FlowUtils.downloadJson(this.graph.toJSON()); }
     triggerFileInput() { document.getElementById('fileInput')?.click(); }
     onFileSelected(event: any) {
@@ -312,9 +274,7 @@ export class FlowEditorComponent implements AfterViewInit {
         FlowUtils.readJsonFile(file).then(json => this.importData(json));
         event.target.value = '';
     }
-    // #endregion
 
-    // #region 5. Utilitários UI
     selectCell(cell: Cell) {
         this.resetSelection();
         this.selectedCell = cell;
@@ -325,8 +285,9 @@ export class FlowEditorComponent implements AfterViewInit {
     resetSelection() {
         if (this.selectedCell) {
             if (this.selectedCell.isNode()) {
-                const isIf = this.selectedCell.getData()?.type === 'if';
-                this.selectedCell.attr('body', { stroke: isIf ? '#faad14' : '#ccc', strokeWidth: 2 });
+                const type = this.selectedCell.getData()?.type;
+                const stroke = type === 'if' ? '#faad14' : (type === 'and' ? '#0f5132' : (type === 'or' ? '#084298' : '#ccc'));
+                this.selectedCell.attr('body', { stroke: stroke, strokeWidth: 2 });
             } else if (this.selectedCell.isEdge()) {
                 this.selectedCell.attr('line', { stroke: '#5F95FF', strokeWidth: 2 });
             }
@@ -337,27 +298,14 @@ export class FlowEditorComponent implements AfterViewInit {
     @HostListener('window:keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
         if ((event.key === 'Delete' || event.key === 'Backspace') && this.selectedCell) {
-            if (this.selectedCell.isNode() && this.selectedCell.getData()?.type === 'start')
-                return;
-
             this.graph.removeCell(this.selectedCell);
             this.selectedCell = null;
         }
     }
-
-    private showSystemAlert(title: string, message: string, type: string = 'info') {
-        this.modalState = { visible: true, type, title, message, confirmLabel: 'Entendi', pendingAction: null };
-        this.cdr.detectChanges();
-    }
-
-    private showSystemConfirm(title: string, message: string, onConfirm: () => void) {
-        this.modalState = { visible: true, type: 'confirm', title, message, confirmLabel: 'Sim', pendingAction: onConfirm };
-    }
-
     confirmModalAction() { this.modalState.pendingAction?.(); this.closeModal(); }
+
     closeModal() {
         this.modalState.visible = false; this.modalState.pendingAction = null;
         this.cdr.detectChanges();
     }
-    // #endregion
 }
