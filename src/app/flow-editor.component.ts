@@ -60,7 +60,8 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('node:dblclick', ({ node }) => {
             this.ngZone.run(() => {
                 const type = node.getData()?.type;
-                if (type === 'and' || type === 'or') return; // Portas lógicas não tem edição
+                if (type === 'and' || type === 'or') return;
+                this.resetSelection();
                 this.fireLegacyModal(node);
             });
         });
@@ -297,11 +298,12 @@ export class FlowEditorComponent implements AfterViewInit {
 
     @HostListener('window:keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
-        if ((event.key === 'Delete' || event.key === 'Backspace') && this.selectedCell) {
+        if ((event.key === 'Delete') && this.selectedCell) {
             this.graph.removeCell(this.selectedCell);
             this.selectedCell = null;
         }
     }
+
     confirmModalAction() { this.modalState.pendingAction?.(); this.closeModal(); }
 
     closeModal() {
