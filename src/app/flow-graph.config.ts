@@ -2,14 +2,14 @@ import { Shape } from '@antv/x6';
 
 export const LABEL_STYLE = {
     fill: '#333',
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: 'Segoe UI',
     fontWeight: 600,
     textAnchor: 'middle',
     refX: 0.5,
     refY: 0.5,
     textWrap: {
-        width: 140,
+        width: 150,
         height: 60,
         ellipsis: true,
         breakWord: false
@@ -35,7 +35,6 @@ export const PORT_GROUPS = {
     },
 };
 
-// Adicionamos o parâmetro 'edge' aqui no destructuring
 export const validateConnectionRule = ({ edge, sourceView, targetView, sourceMagnet, targetMagnet, graph }: any) => {
     if (!sourceMagnet || !targetMagnet || !sourceView || !targetView) return false;
 
@@ -56,38 +55,32 @@ export const validateConnectionRule = ({ edge, sourceView, targetView, sourceMag
     if (sourceNode.getPortProp(sourcePortId, 'disabled')) return false;
 
     // 3. Ações NUNCA podem ter saída (elas são folhas da árvore)
-    if (sourceType !== 'if' && sourceType !== 'and' && sourceType !== 'or') return false;
+    // Liberamos o 'start' caso ele seja lido aqui
+    if (sourceType !== 'if' && sourceType !== 'and' && sourceType !== 'or' && sourceType !== 'start') return false;
 
     // 4. Condição não liga em Condição (Força o uso de AND/OR para encadear)
     if (sourceType === 'if' && targetType === 'if') return false;
 
-    // 5. Condição só liga em AND/OR pela porta TRUE
-    if (sourceType === 'if' && (targetType === 'and' || targetType === 'or')) {
-        if (sourcePortId === 'falseOut') return false;
-    }
+    // 5. PORTAS LÓGICAS NÃO LIGAM EM CONDIÇÕES (Evita paradoxos e curto-circuitos na query)
+    if ((sourceType === 'and' || sourceType === 'or') && targetType === 'if') return false;
 
-    // 6. EXCLUSIVIDADE DE PORTA (A bolinha só aceita UMA linha)
-    const outgoingEdges = graph.getOutgoingEdges(sourceNode) || [];
-    const portAlreadyConnected = outgoingEdges.some((e: any) => e.getSourcePortId() === sourcePortId && e.id !== edge.id);
-    if (portAlreadyConnected) return false;
+    // 6. Condição só liga em AND/OR pela porta TRUE
+    if (sourceType === 'if' && (targetType === 'and' || targetType === 'or'))
+        if (sourcePortId === 'falseOut') return false;
 
     // 7. ENTRADA ÚNICA PARA AÇÕES (Forçar o uso do OR)
-    // Se o destino for uma Ação...
     if (targetType !== 'if' && targetType !== 'and' && targetType !== 'or') {
         const incomingEdges = graph.getIncomingEdges(targetNode) || [];
-        // Verifica se a ação já tem uma linha chegando nela que não seja a que o usuário está segurando
         const actionAlreadyHasInput = incomingEdges.some((e: any) => e.id !== edge.id);
         if (actionAlreadyHasInput) return false;
     }
 
     // 8. PREVENÇÃO DE LOOP INFINITO (Grafo Acíclico)
-    // O motor do X6 busca todos os "pais" e "avós" do nó de origem.
-    // Se o nó de destino já estiver na árvore genealógica de origem, ligar eles cria um curto-circuito (loop).
     const predecessors = graph.getPredecessors(sourceNode) || [];
     const isLoop = predecessors.some((p: any) => p.id === targetNode.id);
     if (isLoop) return false;
 
-    return true; // Se sobreviveu a tudo isso, a conexão é perfeitamente válida!
+    return true;
 };
 
 export const getGraphOptions = (container: HTMLElement) => ({
