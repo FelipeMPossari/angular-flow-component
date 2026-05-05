@@ -1,5 +1,7 @@
 import { Shape } from '@antv/x6';
 
+const EDGE_CONNECTOR = { name: 'smooth' };
+
 export const LABEL_STYLE = {
     fill: '#333',
     fontSize: 12,
@@ -93,8 +95,8 @@ export const getGraphOptions = (container: HTMLElement) => ({
     },
     interacting: true, // Removido o bloqueio do nó start
     connecting: {
-        router: 'manhattan',
-        connector: { name: 'rounded', args: { radius: 8 } },
+        router: { name: 'normal' },
+        connector: EDGE_CONNECTOR,
         anchor: 'center',
         connectionPoint: 'boundary',
         snap: true,
@@ -102,6 +104,7 @@ export const getGraphOptions = (container: HTMLElement) => ({
         highlight: true,
         createEdge() {
             return new Shape.Edge({
+                connector: EDGE_CONNECTOR,
                 attrs: {
                     line: { stroke: '#5F95FF', strokeWidth: 2, targetMarker: { name: 'block', width: 12, height: 8 } }
                 },
