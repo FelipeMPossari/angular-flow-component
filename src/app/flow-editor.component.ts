@@ -205,6 +205,24 @@ export class FlowEditorComponent implements AfterViewInit {
         }
     }
 
+    public copySelectedNode() {
+        if (!this.selectedCell?.isNode()) return;
+
+        const nodeJson = JSON.parse(JSON.stringify(this.selectedCell.toJSON()));
+        delete nodeJson.id;
+
+        const position = this.selectedCell.getPosition();
+        nodeJson.x = position.x + 30;
+        nodeJson.y = position.y + 30;
+        if (nodeJson.position) {
+            nodeJson.position.x = position.x + 30;
+            nodeJson.position.y = position.y + 30;
+        }
+
+        const copiedNode = this.graph.addNode(nodeJson);
+        this.selectCell(copiedNode);
+    }
+
     toggleActions() { this.showActions = !this.showActions; }
 
     public getExportData() {
@@ -298,6 +316,21 @@ export class FlowEditorComponent implements AfterViewInit {
 
     @HostListener('window:keydown', ['$event'])
     handleKeyDown(event: KeyboardEvent) {
+        const target = event.target as HTMLElement | null;
+        const isEditingText = target && (
+            target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.tagName === 'SELECT' ||
+            target.isContentEditable
+        );
+        if (isEditingText) return;
+
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && this.selectedCell?.isNode()) {
+            event.preventDefault();
+            this.copySelectedNode();
+            return;
+        }
+
         if ((event.key === 'Delete') && this.selectedCell) {
             this.graph.removeCell(this.selectedCell);
             this.selectedCell = null;
