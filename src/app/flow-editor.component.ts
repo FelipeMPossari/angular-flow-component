@@ -4,7 +4,8 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Graph, Cell } from '@antv/x6';
+import { Graph, Cell, Node as X6Node } from '@antv/x6';
+import { Selection } from '@antv/x6/es/plugin/selection';
 
 import * as Models from './flow.models';
 import { getGraphOptions, LABEL_STYLE, PORT_GROUPS, validateConnectionRule } from './flow-graph.config';
@@ -49,6 +50,15 @@ export class FlowEditorComponent implements AfterViewInit {
         const options = getGraphOptions(this.container.nativeElement);
         options.connecting.validateConnection = (args: any) => validateConnectionRule({ ...args, graph: this.graph });
         this.graph = new Graph(options);
+        this.graph.use(new Selection({
+            enabled: true,
+            rubberband: true,
+            modifiers: ['ctrl', 'meta'],
+            multiple: true,
+            rubberEdge: false,
+            showNodeSelectionBox: true,
+            showEdgeSelectionBox: false,
+        }) as any);
         this.registerEvents();
     }
 
@@ -56,6 +66,9 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('node:click', ({ node }) => this.ngZone.run(() => this.selectCell(node)));
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
+        this.graph.on('selection:changed', ({ selected }) => {
+            this.ngZone.run(() => this.selectedCell = selected[selected.length - 1] || null);
+        });
 
         this.graph.on('node:dblclick', ({ node }) => {
             this.ngZone.run(() => {
@@ -206,21 +219,32 @@ export class FlowEditorComponent implements AfterViewInit {
     }
 
     public copySelectedNode() {
-        if (!this.selectedCell?.isNode()) return;
+        const selectedNodes = this.getSelectedNodes();
+        if (!selectedNodes.length) return;
 
-        const nodeJson = JSON.parse(JSON.stringify(this.selectedCell.toJSON()));
-        delete nodeJson.id;
+        const copiedNodes = selectedNodes.map(node => {
+            const nodeJson = JSON.parse(JSON.stringify(node.toJSON()));
+            delete nodeJson.id;
 
-        const position = this.selectedCell.getPosition();
-        nodeJson.x = position.x + 30;
-        nodeJson.y = position.y + 30;
-        if (nodeJson.position) {
-            nodeJson.position.x = position.x + 30;
-            nodeJson.position.y = position.y + 30;
-        }
+            const position = node.getPosition();
+            nodeJson.x = position.x + 30;
+            nodeJson.y = position.y + 30;
+            if (nodeJson.position) {
+                nodeJson.position.x = position.x + 30;
+                nodeJson.position.y = position.y + 30;
+            }
 
-        const copiedNode = this.graph.addNode(nodeJson);
-        this.selectCell(copiedNode);
+            return this.graph.addNode(nodeJson);
+        });
+
+        this.graph.resetSelection(copiedNodes);
+        this.selectedCell = copiedNodes[copiedNodes.length - 1] || null;
+    }
+
+    private getSelectedNodes(): X6Node[] {
+        const graphSelectedCells = this.graph.getSelectedCells?.() || [];
+        const selectedCells = graphSelectedCells.length ? graphSelectedCells : (this.selectedCell ? [this.selectedCell] : []);
+        return selectedCells.filter((cell): cell is X6Node => cell.isNode());
     }
 
     toggleActions() { this.showActions = !this.showActions; }
@@ -297,6 +321,7 @@ export class FlowEditorComponent implements AfterViewInit {
     selectCell(cell: Cell) {
         this.resetSelection();
         this.selectedCell = cell;
+        this.graph.resetSelection(cell);
         const style = { stroke: '#ff9c6e', strokeWidth: 3 };
         cell.isNode() ? cell.attr('body', style) : cell.attr('line', style);
     }
@@ -312,6 +337,7 @@ export class FlowEditorComponent implements AfterViewInit {
             }
         }
         this.selectedCell = null;
+        this.graph.cleanSelection?.();
     }
 
     @HostListener('window:keydown', ['$event'])
@@ -331,8 +357,12 @@ export class FlowEditorComponent implements AfterViewInit {
             return;
         }
 
-        if ((event.key === 'Delete') && this.selectedCell) {
-            this.graph.removeCell(this.selectedCell);
+        if (event.key === 'Delete') {
+            const selectedCells = this.graph.getSelectedCells?.() || [];
+            const cellsToRemove = selectedCells.length ? selectedCells : (this.selectedCell ? [this.selectedCell] : []);
+            if (!cellsToRemove.length) return;
+
+            this.graph.removeCells(cellsToRemove);
             this.selectedCell = null;
         }
     }
