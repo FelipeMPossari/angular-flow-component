@@ -90,3 +90,7 @@ O sistema garante a integridade do fluxo através das portas:
 Todos os dados de configuração (qual ferramenta é, qual a condição do IF) são salvos dentro da propriedade `data` de cada célula do X6.
 * Para exportar o fluxo, basta chamar `this.graph.toJSON()`.
 * Para importar, basta chamar `this.graph.fromJSON(dados)`.
+
+### 4. Comandos
+ng serve 
+ng build --configuration element
