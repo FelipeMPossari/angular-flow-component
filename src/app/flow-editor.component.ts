@@ -28,6 +28,7 @@ export class FlowEditorComponent implements AfterViewInit {
 
     private graph!: Graph;
     selectedCell: Cell | null = null;
+    private syncingSelection = false;
     showActions = true;
     modalState: Models.ModalState = { visible: false, type: 'alert', title: '', message: '', confirmLabel: 'OK', pendingAction: null };
 
@@ -67,7 +68,7 @@ export class FlowEditorComponent implements AfterViewInit {
         this.graph.on('edge:click', ({ edge }) => this.ngZone.run(() => this.selectCell(edge)));
         this.graph.on('blank:click', () => this.ngZone.run(() => this.resetSelection()));
         this.graph.on('selection:changed', ({ selected }) => {
-            this.ngZone.run(() => this.selectedCell = selected[selected.length - 1] || null);
+            this.ngZone.run(() => this.handleSelectionChanged(selected));
         });
 
         this.graph.on('node:dblclick', ({ node }) => {
@@ -321,12 +322,36 @@ export class FlowEditorComponent implements AfterViewInit {
     selectCell(cell: Cell) {
         this.resetSelection();
         this.selectedCell = cell;
-        this.graph.resetSelection(cell);
-        const style = { stroke: '#ff9c6e', strokeWidth: 3 };
-        cell.isNode() ? cell.attr('body', style) : cell.attr('line', style);
+        this.applySelectedStyle(cell);
     }
 
     resetSelection() {
+        this.clearSelectedStyle();
+        this.graph.cleanSelection?.();
+    }
+
+    private handleSelectionChanged(selected: Cell[]) {
+        if (this.syncingSelection) return;
+
+        if (selected.length > 1) {
+            this.clearSelectedStyle();
+            this.selectedCell = selected[selected.length - 1] || null;
+            return;
+        }
+
+        if (selected.length === 1) {
+            const cell = selected[0];
+            this.syncingSelection = true;
+            this.graph.cleanSelection?.();
+            this.syncingSelection = false;
+
+            this.clearSelectedStyle();
+            this.selectedCell = cell;
+            this.applySelectedStyle(cell);
+        }
+    }
+
+    private clearSelectedStyle() {
         if (this.selectedCell) {
             if (this.selectedCell.isNode()) {
                 const type = this.selectedCell.getData()?.type;
@@ -337,7 +362,11 @@ export class FlowEditorComponent implements AfterViewInit {
             }
         }
         this.selectedCell = null;
-        this.graph.cleanSelection?.();
+    }
+
+    private applySelectedStyle(cell: Cell) {
+        const style = { stroke: '#ff9c6e', strokeWidth: 3 };
+        cell.isNode() ? cell.attr('body', style) : cell.attr('line', style);
     }
 
     @HostListener('window:keydown', ['$event'])

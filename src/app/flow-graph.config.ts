@@ -43,7 +43,7 @@ export const validateConnectionRule = ({ edge, sourceView, targetView, sourceMag
     const sourceGroup = sourceMagnet.getAttribute('port-group');
     const targetGroup = targetMagnet.getAttribute('port-group');
 
-    // 1. Sentido Obrigatório (Saída para Entrada)
+    // 1. Sentido Obrigatorio (Saida para Entrada)
     if (sourceGroup === 'in') return false;
     if (targetGroup !== 'in') return false;
 
@@ -55,6 +55,15 @@ export const validateConnectionRule = ({ edge, sourceView, targetView, sourceMag
 
     // 2. Bloqueio dinâmico (A porta foi ocultada visualmente via evento)
     if (sourceNode.getPortProp(sourcePortId, 'disabled')) return false;
+
+    // Impede conexao duplicada entre o mesmo par de nos.
+    const duplicatedConnection = (graph.getEdges() || []).some((existingEdge: any) => {
+        if (existingEdge.id === edge.id) return false;
+        const source = existingEdge.getSource();
+        const target = existingEdge.getTarget();
+        return source?.cell === sourceNode.id && target?.cell === targetNode.id;
+    });
+    if (duplicatedConnection) return false;
 
     // 3. Ações NUNCA podem ter saída (elas são folhas da árvore)
     // Liberamos o 'start' caso ele seja lido aqui
@@ -70,14 +79,8 @@ export const validateConnectionRule = ({ edge, sourceView, targetView, sourceMag
     if (sourceType === 'if' && (targetType === 'and' || targetType === 'or'))
         if (sourcePortId === 'falseOut') return false;
 
-    // 7. ENTRADA ÚNICA PARA AÇÕES (Forçar o uso do OR)
-    if (targetType !== 'if' && targetType !== 'and' && targetType !== 'or') {
-        const incomingEdges = graph.getIncomingEdges(targetNode) || [];
-        const actionAlreadyHasInput = incomingEdges.some((e: any) => e.id !== edge.id);
-        if (actionAlreadyHasInput) return false;
-    }
-
-    // 8. PREVENÇÃO DE LOOP INFINITO (Grafo Acíclico)
+    // 7. Acoes podem receber multiplas entradas; o engine trata cada entrada como uma regra independente.
+    // 8. Prevencao de loop infinito (grafo aciclico)
     const predecessors = graph.getPredecessors(sourceNode) || [];
     const isLoop = predecessors.some((p: any) => p.id === targetNode.id);
     if (isLoop) return false;
